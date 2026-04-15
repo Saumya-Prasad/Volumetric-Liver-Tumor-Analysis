@@ -1,0 +1,25 @@
+# requirements.txt
+# Core deep learning
+torch>=2.0.0
+torchvision>=0.15.0
+einops>=0.7.0
+
+# Medical imaging / DICOM
+pydicom>=2.4.0
+scikit-image>=0.21.0
+
+# Data / utils
+numpy>=1.24.0
+Pillow>=9.5.0
+matplotlib>=3.7.0
+imageio>=2.31.0
+kagglehub>=0.2.0
+
+# API server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Optionals
+tensorboard>=2.13.0
+tqdm>=4.65.0
