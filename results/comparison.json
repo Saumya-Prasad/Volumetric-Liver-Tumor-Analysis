@@ -1,0 +1,26 @@
+{
+  "conv_ae": {
+    "score": 0.017716046422719955,
+    "label": "tumor"
+  },
+  "ae_flow": {
+    "score": -388.2350769042969,
+    "label": "normal"
+  },
+  "ccb_aae": {
+    "score": 0.0002485523000359535,
+    "label": "normal"
+  },
+  "qformer": {
+    "score": 0.013633789494633675,
+    "label": "tumor"
+  },
+  "ensemble": {
+    "score": 0.0028663647826761007,
+    "label": "normal"
+  },
+  "__final_vote__": {
+    "label": "normal",
+    "votes": 2
+  }
+}

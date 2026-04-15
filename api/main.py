@@ -28,6 +28,7 @@ import json
 import base64
 import tempfile
 import traceback
+import zipfile
 from pathlib import Path
 from typing import Optional, List
 
@@ -171,7 +172,7 @@ def process_dicom_bytes(dicom_bytes: bytes, model_name: str, img_size: int):
         # Raw pixels
         dcm       = pydicom.dcmread(tmp_path)
         raw       = dcm.pixel_array.astype(np.float32)
-        raw_norm  = (raw - raw.min()) / (raw.ptp() + 1e-8)
+        raw_norm  = (raw - raw.min()) / ((raw.max() - raw.min()) + 1e-8)
         raw_pil   = np.array(Image.fromarray(
             (raw_norm * 255).astype(np.uint8)).resize((img_size, img_size))) / 255.0
 
@@ -186,8 +187,8 @@ def process_dicom_bytes(dicom_bytes: bytes, model_name: str, img_size: int):
         score, emap, xh = run_inference(model, model_name, x)
         label     = classify(score, model_name)
 
-        emap_np   = emap.squeeze().cpu().numpy()
-        xh_np     = xh.squeeze().cpu().numpy()
+        emap_np   = emap.squeeze().cpu().detach().numpy()
+        xh_np     = xh.squeeze().cpu().detach().numpy()
 
         overlay   = _make_overlay(prep, emap_np)
         heatmap   = _make_heatmap(emap_np)
@@ -314,27 +315,112 @@ async def predict_batch(
     })
 
 
+@app.post('/predict/zip')
+async def predict_zip(
+    file: UploadFile = File(..., description='ZIP file containing DICOM (.dcm) slices'),
+    model_name: str  = Form('ae_flow'),
+    img_size: int    = Form(256),
+):
+    """
+    Upload a ZIP archive containing a volume of DICOM slices.
+    Returns per-slice scores + a volume-level classification.
+    """
+    if not file.filename.endswith('.zip'):
+        raise HTTPException(400, "File must be a .zip archive")
+        
+    if model_name not in AVAILABLE_MODELS:
+        raise HTTPException(400, f"Unknown model '{model_name}'.")
+
+    slice_results = []
+    try:
+        zip_bytes = await file.read()
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+            # Drop the strict .dcm extension check to support raw file uploads without extensions
+            dcm_files = [n for n in z.namelist() if not n.endswith('/') and '__macosx' not in n.lower() and '.ds_store' not in n.lower()]
+            if not dcm_files:
+                raise HTTPException(400, "No valid files found in ZIP archive.")
+                
+            for dcm_name in dcm_files:
+                try:
+                    data = z.read(dcm_name)
+                    result = process_dicom_bytes(data, model_name, img_size)
+                    result_slim = {k: v for k, v in result.items() if k != 'images'}
+                    result_slim['filename'] = dcm_name
+                    slice_results.append(result_slim)
+                except Exception as e:
+                    slice_results.append({'filename': dcm_name, 'error': str(e)})
+                    
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "Invalid or corrupted ZIP file.")
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(500, f"ZIP processing failed: {str(e)}")
+
+    tumor_slices = [r for r in slice_results if isinstance(r.get('label'), str) and r['label'] == 'tumor']
+    volume_label = 'tumor' if len(tumor_slices) > 0 else 'normal'
+    max_score    = max((r.get('score', 0.0) for r in slice_results if 'score' in r), default=0.0)
+
+    return JSONResponse(content={
+        'volume_label' : volume_label,
+        'max_score'    : round(max_score, 6),
+        'tumor_slices' : len(tumor_slices),
+        'total_slices' : len(slice_results),
+        'slices'       : slice_results,
+    })
+
+
 @app.post('/predict/compare')
 async def predict_compare(
     file: UploadFile = File(...),
     img_size: int    = Form(256),
 ):
     """
-    Run ALL trained models on one slice and return comparison results.
+    Run ALL trained models on a single slice OR a ZIP volume and return comparison results.
     Useful for clinical review / model disagreement analysis.
     """
-    dicom_bytes = await file.read()
-    results     = {}
+    results = {m: {'score': -float('inf'), 'label': 'normal'} for m in AVAILABLE_MODELS}
 
-    for model_name in AVAILABLE_MODELS:
-        try:
-            r = process_dicom_bytes(dicom_bytes, model_name, img_size)
-            results[model_name] = {
-                'score' : r['score'],
-                'label' : r['label'],
-            }
-        except Exception as e:
-            results[model_name] = {'error': str(e)}
+    try:
+        file_bytes = await file.read()
+        
+        # If it's a zip file, process volumetrically
+        if file.filename.endswith('.zip'):
+            with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+                dcm_files = [n for n in z.namelist() if not n.endswith('/') and '__macosx' not in n.lower() and '.ds_store' not in n.lower()]
+                if not dcm_files:
+                    raise HTTPException(400, "No valid files found in ZIP archive.")
+                
+                # We need to find the max anomaly score per model across ALL slices in the ZIP
+                for dcm_name in dcm_files:
+                    data = z.read(dcm_name)
+                    for model_name in AVAILABLE_MODELS:
+                        try:
+                            if 'error' in results[model_name]: continue
+                            r = process_dicom_bytes(data, model_name, img_size)
+                            if r['score'] > results[model_name]['score']:
+                                results[model_name]['score'] = r['score']
+                                results[model_name]['label'] = r['label']
+                        except Exception as e:
+                            results[model_name] = {'error': str(e)}
+        else:
+            # Single DICOM slice
+            for model_name in AVAILABLE_MODELS:
+                try:
+                    r = process_dicom_bytes(file_bytes, model_name, img_size)
+                    results[model_name] = {
+                        'score' : r['score'],
+                        'label' : r['label'],
+                    }
+                except Exception as e:
+                    results[model_name] = {'error': str(e)}
+                    
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "Invalid or corrupted ZIP file.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(500, f"Processing failed: {str(e)}")
 
     # Majority vote
     labels = [v['label'] for v in results.values() if 'label' in v]

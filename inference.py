@@ -298,14 +298,14 @@ def main():
     dcm_path = args.dicom
     if os.path.isdir(dcm_path):
         # Use middle slice
-        files   = sorted(glob.glob(os.path.join(dcm_path, '*.dcm')))
+        files   = sorted(glob.glob(os.path.join(dcm_path, '**', '*.dcm'), recursive=True))
         dcm_path = files[len(files) // 2]
         print(f"Using slice: {dcm_path}")
 
     # Raw pixel (for display)
     dicom       = pydicom.dcmread(dcm_path)
     raw_pixels  = dicom.pixel_array.astype(np.float32)
-    raw_norm    = (raw_pixels - raw_pixels.min()) / (raw_pixels.ptp() + 1e-8)
+    raw_norm    = (raw_pixels - raw_pixels.min()) / ((raw_pixels.max() - raw_pixels.min()) + 1e-8)
     raw_pil     = np.array(Image.fromarray(
         (raw_norm * 255).astype(np.uint8)).resize(
         (args.img_size, args.img_size))) / 255.0
@@ -356,8 +356,8 @@ def main():
     print(f"Score: {score:.5f}  →  {label.upper()}")
 
     # Squeeze to numpy
-    emap_np = emap.squeeze().cpu().numpy()
-    xh_np   = xh.squeeze().cpu().numpy()
+    emap_np = emap.squeeze().cpu().detach().numpy()
+    xh_np   = xh.squeeze().cpu().detach().numpy()
 
     save_results(raw_pil, preprocessed, xh_np, emap_np,
                  score, label, args.save_dir, args.model)
