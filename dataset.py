@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-dataset.py
-CHAOS CT Dataset Loader with HU preprocessing.
-Downloads from Kaggle and provides PyTorch DataLoaders.
-"""
-
 import os
 import glob
 import random
@@ -15,9 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 
-# ──────────────────────────────────────────────
 # 1.  DICOM  →  Normalised numpy [0,1]
-# ──────────────────────────────────────────────
 
 def preprocess_dicom(dcm_path: str,
                      window_min: int = -100,
@@ -67,9 +58,7 @@ def load_volume(patient_dir: str, **kw) -> list:
     return imgs
 
 
-# ──────────────────────────────────────────────
 # 2.  PyTorch Dataset
-# ──────────────────────────────────────────────
 
 class CHAOSDataset(Dataset):
     """
@@ -135,9 +124,7 @@ class CHAOSDataset(Dataset):
         return tensor   # float32, shape (1, H, W), values [0,1]
 
 
-# ──────────────────────────────────────────────
 # 3.  Convenience factory
-# ──────────────────────────────────────────────
 
 def get_dataloaders(root_path: str,
                     target_size: int = 256,
@@ -158,10 +145,7 @@ def get_dataloaders(root_path: str,
                               shuffle=False, num_workers=num_workers)
     return train_loader, val_loader, test_loader
 
-
-# ──────────────────────────────────────────────
 # Quick smoke-test
-# ──────────────────────────────────────────────
 if __name__ == '__main__':
     import kagglehub
     path = kagglehub.dataset_download(
