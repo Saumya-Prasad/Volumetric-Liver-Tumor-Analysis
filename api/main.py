@@ -137,6 +137,28 @@ def _np_to_b64(arr: np.ndarray, fmt='PNG') -> str:
     return base64.b64encode(buf.getvalue()).decode('utf-8')
 
 
+def _make_gif_b64(images: list, duration=150) -> str:
+    """Combines a list of base64 PNGs into a single base64 GIF."""
+    if not images: return ""
+    import io
+    from PIL import Image
+    try:
+        pil_images = [Image.open(io.BytesIO(base64.b64decode(b))) for b in images]
+        buf = io.BytesIO()
+        pil_images[0].save(buf, format='GIF', save_all=True, append_images=pil_images[1:], loop=0, duration=duration)
+        return base64.b64encode(buf.getvalue()).decode('utf-8')
+    except Exception as e:
+        print("GIF Compilation Error:", e)
+        return images[0]
+
+def _get_slice_location(dcm_bytes: bytes) -> float:
+    """Tries to extract spatial Z-axis order from raw DICOM bytes to prevent flickering GIFs."""
+    try:
+        d = pydicom.dcmread(io.BytesIO(dcm_bytes), stop_before_pixels=True)
+        return float(d.SliceLocation) if hasattr(d, 'SliceLocation') else float(d.InstanceNumber)
+    except:
+        return 0.0
+
 def _make_overlay(preprocessed: np.ndarray,
                   error_map: np.ndarray) -> np.ndarray:
     """Red overlay on detected regions."""
@@ -245,29 +267,51 @@ async def list_models():
 
 @app.post('/predict')
 async def predict(
-    file: UploadFile = File(..., description='DICOM (.dcm) file'),
-    model_name: str  = Form('ae_flow',
-                             description='Model to use for inference'),
+    file: UploadFile = File(..., description='DICOM (.dcm) file or ZIP volume'),
+    model_name: str  = Form('ae_flow', description='Model to use for inference'),
     img_size: int    = Form(256),
 ):
     """
-    Upload a single DICOM slice and get anomaly detection results.
-
-    Returns JSON with:
-      - score: float (anomaly score)
-      - label: 'normal' or 'tumor'
-      - images: { original, preprocessed, reconstruction, error_map, overlay }
-                all base64-encoded PNG strings
-      - dicom_metadata: PatientID, Modality, slice location etc.
+    Upload a DICOM slice OR a ZIP volume and get anomaly detection results.
+    Returns JSON with score, label, and base64 images (PNGs or Animated GIFs depending on input).
     """
     if model_name not in AVAILABLE_MODELS:
-        raise HTTPException(400, f"Unknown model '{model_name}'. "
-                                 f"Available: {list(AVAILABLE_MODELS.keys())}")
+        raise HTTPException(400, f"Unknown model '{model_name}'.")
 
     try:
-        dicom_bytes = await file.read()
-        result      = process_dicom_bytes(dicom_bytes, model_name, img_size)
-        return JSONResponse(content=result)
+        file_bytes = await file.read()
+        if file.filename.endswith('.zip'):
+            with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+                dcm_files = [n for n in z.namelist() if not n.endswith('/') and '__macosx' not in n.lower() and '.ds_store' not in n.lower()]
+                if not dcm_files: raise HTTPException(400, "No valid files.")
+                
+                slices_data = []
+                for n in dcm_files:
+                    b = z.read(n)
+                    slices_data.append((_get_slice_location(b), b))
+                slices_data.sort(key=lambda x: x[0])
+
+                accumulated = {'original': [], 'preprocessed': [], 'reconstruction': [], 'error_map': [], 'overlay': []}
+                max_score, final_label = -float('inf'), 'normal'
+                
+                for _, b in slices_data:
+                    r = process_dicom_bytes(b, model_name, img_size)
+                    if r['score'] > max_score:
+                        max_score = r['score']
+                        final_label = r['label']
+                    for k in accumulated:
+                        accumulated[k].append(r['images'][k])
+
+                return JSONResponse(content={
+                    'score': max_score,
+                    'label': final_label,
+                    'model': model_name,
+                    'threshold': THRESHOLDS.get(model_name, 0.02),
+                    'images': {k: _make_gif_b64(accumulated[k]) for k in accumulated}
+                })
+        else:
+            result = process_dicom_bytes(file_bytes, model_name, img_size)
+            return JSONResponse(content=result)
 
     except Exception as e:
         traceback.print_exc()
@@ -383,46 +427,56 @@ async def predict_compare(
     try:
         file_bytes = await file.read()
         
-        # If it's a zip file, process volumetrically
         if file.filename.endswith('.zip'):
             with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
                 dcm_files = [n for n in z.namelist() if not n.endswith('/') and '__macosx' not in n.lower() and '.ds_store' not in n.lower()]
-                if not dcm_files:
-                    raise HTTPException(400, "No valid files found in ZIP archive.")
+                if not dcm_files: raise HTTPException(400, "No valid files.")
                 
-                # We need to find the max anomaly score per model across ALL slices in the ZIP
-                for dcm_name in dcm_files:
-                    data = z.read(dcm_name)
+                slices_data = []
+                for n in dcm_files:
+                    b = z.read(n)
+                    slices_data.append((_get_slice_location(b), b))
+                slices_data.sort(key=lambda x: x[0])
+
+                accumulated_all = {m: {'original': [], 'preprocessed': [], 'reconstruction': [], 'error_map': [], 'overlay': []} for m in AVAILABLE_MODELS}
+
+                for _, b in slices_data:
                     for model_name in AVAILABLE_MODELS:
                         try:
                             if 'error' in results[model_name]: continue
-                            r = process_dicom_bytes(data, model_name, img_size)
+                            r = process_dicom_bytes(b, model_name, img_size)
                             if r['score'] > results[model_name]['score']:
                                 results[model_name]['score'] = r['score']
                                 results[model_name]['label'] = r['label']
+                            for k in accumulated_all[model_name]:
+                                accumulated_all[model_name][k].append(r['images'][k])
                         except Exception as e:
                             results[model_name] = {'error': str(e)}
+
+                for model_name in AVAILABLE_MODELS:
+                    if 'error' not in results[model_name]:
+                        results[model_name]['images'] = {k: _make_gif_b64(v) for k, v in accumulated_all[model_name].items()}
+
         else:
-            # Single DICOM slice
             for model_name in AVAILABLE_MODELS:
                 try:
                     r = process_dicom_bytes(file_bytes, model_name, img_size)
                     results[model_name] = {
                         'score' : r['score'],
                         'label' : r['label'],
+                        'images': r['images']
                     }
                 except Exception as e:
                     results[model_name] = {'error': str(e)}
                     
     except zipfile.BadZipFile:
-        raise HTTPException(400, "Invalid or corrupted ZIP file.")
+        raise HTTPException(400, "Invalid archive.")
     except HTTPException:
         raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(500, f"Processing failed: {str(e)}")
 
-    # Majority vote
     labels = [v['label'] for v in results.values() if 'label' in v]
     vote   = 'tumor' if labels.count('tumor') > len(labels) // 2 else 'normal'
 
