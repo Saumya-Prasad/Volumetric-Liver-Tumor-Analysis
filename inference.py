@@ -42,7 +42,7 @@ from PIL import Image
 import pydicom
 import imageio
 
-# ── local imports ────────────────────────────
+# ── local imports 
 from dataset import preprocess_dicom
 from models.model_1_conv_ae   import ConvAutoencoder
 from models.model_1_conv_ae   import anomaly_score as score_conv
@@ -59,9 +59,8 @@ from models.model_6_ensemble_ae import EnsembleAE, EnsembleScorer
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
-# ─────────────────────────────────────────────
 # Model registry
-# ─────────────────────────────────────────────
+
 
 def load_model(model_name: str, ckpt_path: str):
     """Instantiate + load weights."""
@@ -131,9 +130,7 @@ def run_inference(model, model_name: str, x: torch.Tensor,
     return score_val, emap, xh
 
 
-# ─────────────────────────────────────────────
 # Threshold calibration (set per model on val data)
-# ─────────────────────────────────────────────
 
 THRESHOLDS = {
     'conv_ae'  : 0.015,
@@ -150,9 +147,7 @@ def classify(score: float, model_name: str) -> str:
     return 'tumor' if score > thr else 'normal'
 
 
-# ─────────────────────────────────────────────
 # Visualisation helpers
-# ─────────────────────────────────────────────
 
 def save_results(original_np: np.ndarray,
                  preprocessed_np: np.ndarray,
@@ -175,7 +170,7 @@ def save_results(original_np: np.ndarray,
         threshold = float(np.percentile(error_map_np, 95))
     binary_mask = (error_map_np > threshold).astype(np.uint8)
 
-    # ── Save individual images ────────────────
+    # ── Save individual images
     def _save(arr, name):
         img = Image.fromarray((arr * 255).astype(np.uint8))
         img.save(os.path.join(save_dir, name))
@@ -275,9 +270,7 @@ def compare_models(x_tensor: torch.Tensor,
     return results
 
 
-# ─────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description='Liver Anomaly Inference')
