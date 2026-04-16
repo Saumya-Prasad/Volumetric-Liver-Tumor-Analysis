@@ -367,44 +367,40 @@ async def predict(
                 # --- Handle Comparison Mode (ALL MODELS) -----------------
                 if model_name == "ALL MODELS":
                     comparison_results = {m: {'score': -float('inf'), 'label': 'normal', 'images': None} for m in AVAILABLE_MODELS}
-                    # We only generate GIFs for the Ensemble model to keep payload small
-                    accumulated_ensemble = {
-                        'original': [], 'overlay': [], 'reconstruction': [],
-                        'preprocessed': [], 'error_map': []
+                    
+                    # Accumulator for all models to enable visual comparison
+                    accumulated_all = {
+                        m: {
+                            'original': [], 'overlay': [], 'reconstruction': [],
+                            'preprocessed': [], 'error_map': []
+                        } for m in AVAILABLE_MODELS
                     }
                     
-                    for _, b in slices_data:
-                        # 1. Run Ensemble for the full visual diagnostic
-                        r_ensemble = process_dicom_bytes(b, 'ensemble', img_size, include_images=True)
-                        for k in accumulated_ensemble:
-                            accumulated_ensemble[k].append(r_ensemble['images'][k])
-                        
-                        # 2. Run all others for the numerical labels/scores ONLY (speed + efficiency)
+                    # Target 30 frames for comparison mode GIF generation (Ensemble-all overhead)
+                    comp_target = 30
+                    if len(slices_data) > comp_target:
+                        indices = [int(i * (len(slices_data) - 1) / (comp_target - 1)) for i in range(comp_target)]
+                        comp_slices = [slices_data[idx] for idx in indices]
+                    else:
+                        comp_slices = slices_data
+
+                    for _, b in comp_slices:
                         for m in AVAILABLE_MODELS:
-                            if m == 'ensemble':
-                                r = r_ensemble
-                            else:
-                                r = process_dicom_bytes(b, m, img_size, include_images=False)
+                            r = process_dicom_bytes(b, m, img_size, include_images=True)
                             
                             if r['score'] > comparison_results[m]['score']:
                                 comparison_results[m]['score'] = r['score']
                                 comparison_results[m]['label'] = r['label']
+                            
+                            # Accumulate uniquely for every model
+                            for k in ['original', 'overlay', 'reconstruction', 'preprocessed', 'error_map']:
+                                accumulated_all[m][k].append(r['images'][k])
 
-                    # Post-process: Add Ensemble GIFs and Skeleton images for others
+                    # Build unique GIFs for every model
                     for m in AVAILABLE_MODELS:
-                        if m == 'ensemble':
-                            comparison_results[m]['images'] = {
-                                'original': _make_gif_b64(accumulated_ensemble['original']),
-                                'overlay' : _make_gif_b64(accumulated_ensemble['overlay']),
-                                'reconstruction': _make_gif_b64(accumulated_ensemble['reconstruction']),
-                                'preprocessed': _make_gif_b64(accumulated_ensemble['preprocessed']),
-                                'error_map': _make_gif_b64(accumulated_ensemble['error_map'])
-                            }
-                        else:
-                            # Skeletal structure for Android compatibility without the bloat
-                            comparison_results[m]['images'] = {
-                                'original': "", 'overlay': "", 'error_map': "", 'preprocessed': "", 'reconstruction': ""
-                            }
+                        comparison_results[m]['images'] = {
+                            k: _make_gif_b64(v) for k, v in accumulated_all[m].items()
+                        }
 
                     labels = [v['label'] for v in comparison_results.values()]
                     majority_vote = 'tumor' if labels.count('tumor') > len(labels) // 2 else 'normal'
