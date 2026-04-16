@@ -176,18 +176,21 @@ def _get_slice_location(dcm_bytes: bytes) -> float:
         return 0.0
 
 def _make_overlay(preprocessed: np.ndarray,
-                  error_map: np.ndarray) -> np.ndarray:
+                  error_map: np.ndarray,
+                  model_name: str) -> np.ndarray:
     """Red overlay on detected regions."""
+    # Use the calibrated threshold for this specific model
+    fixed_threshold = float(THRESHOLDS_LIVER.get(model_name, 0.02))
+    
     # Only calculate stats on non-zero liver pixels to avoid background dilution
     active_errors = error_map[error_map > 1e-6]
     if len(active_errors) > 0:
-        # Sweet Spot Adaptive Threshold: Clamped Sensitivity Model
-        # floor = 0.025 (ignores AI grain / pepper noise)
-        # cap   = 0.040 (ensures large tumors aren't ignored by a picking-too-high percentile)
+        # Blend the fixed threshold with a local adaptive percentile to handle varying intensities
         p70 = float(np.percentile(active_errors, 70))
-        threshold = max(0.025, min(p70, 0.040))
+        # if the model is very confident (score >> threshold), we trust the percentile less
+        threshold = max(fixed_threshold, min(p70, fixed_threshold * 1.5))
     else:
-        threshold = 0.040 # noise floor cap
+        threshold = fixed_threshold
         
     # Spatial Consistency Filter: Real tumors are 'blobs', noise is 'pepper dots'.
     # We apply a 3x3 median filter to eliminate isolated noisy pixels.
@@ -274,7 +277,7 @@ def process_dicom_bytes(dicom_bytes: bytes, model_name: str, img_size: int, incl
         }
 
         if include_images:
-            overlay = _make_overlay(prep, emap_np)
+            overlay = _make_overlay(prep, emap_np, model_name)
             heatmap = _make_heatmap(emap_np)
             res['images'] = {
                 'original'     : _np_to_b64(raw_pil),
@@ -309,7 +312,7 @@ async def list_models():
             'name'       : name,
             'description': MODEL_DESCRIPTIONS[name],
             'trained'    : os.path.exists(ckpt_path),
-            'threshold'  : THRESHOLDS.get(name, 0.02),
+            'threshold'  : THRESHOLDS_LIVER.get(name, 0.02),
         })
     return {'models': result}
 
@@ -422,7 +425,7 @@ async def predict(
                 results = {}
                 # Images only for Ensemble
                 for m in AVAILABLE_MODELS:
-                    include_imgs = (m == 'ensemble')
+                    include_imgs = True # Include images for all models in comparison mode
                     results[m] = process_dicom_bytes(file_bytes, m, img_size, include_images=include_imgs)
                 
                 labels = [v['label'] for v in results.values()]

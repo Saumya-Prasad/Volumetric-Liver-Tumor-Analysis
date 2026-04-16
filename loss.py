@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class SSIMLoss3D(nn.Module):
+class SSIMLoss2D(nn.Module):
     def __init__(self, window_size=7, C1=0.01**2, C2=0.03**2):
         super().__init__()
         self.window_size = window_size
@@ -16,23 +16,23 @@ class SSIMLoss3D(nn.Module):
         coords = torch.arange(size).float() - size // 2
         g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
         g = g / g.sum()
-        kernel = g[:, None, None] * g[None, :, None] * g[None, None, :]
-        return kernel.unsqueeze(0).unsqueeze(0)  # (1,1,k,k,k)
+        kernel = g[:, None] * g[None, :]
+        return kernel.unsqueeze(0).unsqueeze(0)  # (1,1,k,k)
 
     def forward(self, pred, target):
         kernel = self.kernel.to(pred.device)
         pad = self.window_size // 2
 
-        mu1 = F.conv3d(pred, kernel, padding=pad)
-        mu2 = F.conv3d(target, kernel, padding=pad)
+        mu1 = F.conv2d(pred, kernel, padding=pad)
+        mu2 = F.conv2d(target, kernel, padding=pad)
 
         mu1_sq = mu1 ** 2
         mu2_sq = mu2 ** 2
         mu1_mu2 = mu1 * mu2
 
-        sigma1_sq = F.conv3d(pred * pred, kernel, padding=pad) - mu1_sq
-        sigma2_sq = F.conv3d(target * target, kernel, padding=pad) - mu2_sq
-        sigma12 = F.conv3d(pred * target, kernel, padding=pad) - mu1_mu2
+        sigma1_sq = F.conv2d(pred * pred, kernel, padding=pad) - mu1_sq
+        sigma2_sq = F.conv2d(target * target, kernel, padding=pad) - mu2_sq
+        sigma12 = F.conv2d(pred * target, kernel, padding=pad) - mu1_mu2
 
         numerator = (2 * mu1_mu2 + self.C1) * (2 * sigma12 + self.C2)
         denominator = (mu1_sq + mu2_sq + self.C1) * (sigma1_sq + sigma2_sq + self.C2)
@@ -42,40 +42,28 @@ class SSIMLoss3D(nn.Module):
 
 class FrequencyLoss(nn.Module):
     def forward(self, pred, target):
-        pred_fft = torch.fft.fftn(pred, dim=(-3, -2, -1))
-        target_fft = torch.fft.fftn(target, dim=(-3, -2, -1))
+        # 2D FFT because pred is (B, C, H, W)
+        pred_fft = torch.fft.fftn(pred, dim=(-2, -1))
+        target_fft = torch.fft.fftn(target, dim=(-2, -1))
         pred_mag = torch.abs(pred_fft)
         target_mag = torch.abs(target_fft)
         return F.l1_loss(pred_mag, target_mag)
 
 
-class EdgeLoss3D(nn.Module):
+class EdgeLoss2D(nn.Module):
     def __init__(self):
         super().__init__()
-        sobel_1d = torch.tensor([-1.0, 0.0, 1.0])
-        smooth_1d = torch.tensor([1.0, 2.0, 1.0]) / 4.0
-
-        def make_3d_kernel(direction):
-            if direction == 'x':
-                k = torch.einsum('i,j,k->ijk', smooth_1d, smooth_1d, sobel_1d)
-            elif direction == 'y':
-                k = torch.einsum('i,j,k->ijk', smooth_1d, sobel_1d, smooth_1d)
-            else:
-                k = torch.einsum('i,j,k->ijk', sobel_1d, smooth_1d, smooth_1d)
-            return k.unsqueeze(0).unsqueeze(0)
-
-        self.register_buffer('kx', make_3d_kernel('x'))
-        self.register_buffer('ky', make_3d_kernel('y'))
-        self.register_buffer('kz', make_3d_kernel('z'))
+        kx = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=torch.float32)
+        ky = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=torch.float32)
+        self.register_buffer('kx', kx.view(1, 1, 3, 3))
+        self.register_buffer('ky', ky.view(1, 1, 3, 3))
 
     def gradient_magnitude(self, x):
         kx = self.kx.to(x.device)
         ky = self.ky.to(x.device)
-        kz = self.kz.to(x.device)
-        gx = F.conv3d(x, kx, padding=1)
-        gy = F.conv3d(x, ky, padding=1)
-        gz = F.conv3d(x, kz, padding=1)
-        return torch.sqrt(gx**2 + gy**2 + gz**2 + 1e-8)
+        gx = F.conv2d(x, kx, padding=1)
+        gy = F.conv2d(x, ky, padding=1)
+        return torch.sqrt(gx**2 + gy**2 + 1e-8)
 
     def forward(self, pred, target):
         edge_pred = self.gradient_magnitude(pred)
@@ -91,9 +79,9 @@ class CombinedLoss(nn.Module):
         self.w_freq = w_freq
         self.w_edge = w_edge
         self.l1 = nn.L1Loss()
-        self.ssim = SSIMLoss3D()
+        self.ssim = SSIMLoss2D()
         self.freq = FrequencyLoss()
-        self.edge = EdgeLoss3D()
+        self.edge = EdgeLoss2D()
 
     def forward(self, pred, target):
         l1_val = self.l1(pred, target)

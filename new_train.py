@@ -6,15 +6,15 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from collections import defaultdict
 
-from model import build_model
+from models.model import build_model
 from loss import CombinedLoss
-from data_loader import get_dataloaders
+from dataset import get_dataloaders
 
 
 SAVE_DIR = "outputs"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-EPOCHS = 50
+EPOCHS = 15
 BATCH_SIZE = 1
 LR = 1e-4
 VIZ_INTERVAL = 5
@@ -22,12 +22,11 @@ MODEL_PATH = "model.pth"
 
 
 def save_reconstruction_viz(epoch, inputs, recons, save_dir):
-    inputs_np = inputs[0, 0].cpu().numpy()   # (D,H,W)
+    inputs_np = inputs[0, 0].cpu().numpy()   # (H,W)
     recons_np = recons[0, 0].cpu().detach().numpy()
-    mid = inputs_np.shape[0] // 2
 
-    inp_slice = inputs_np[mid]
-    rec_slice = recons_np[mid]
+    inp_slice = inputs_np
+    rec_slice = recons_np
     anom_map = np.abs(inp_slice - rec_slice)
 
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
@@ -120,10 +119,9 @@ def save_roc_curve(labels, scores, save_dir="."):
 def save_threshold_viz(inputs, recons, save_dir, epoch):
     inputs_np = inputs[0, 0].cpu().numpy()
     recons_np = recons[0, 0].cpu().detach().numpy()
-    mid = inputs_np.shape[0] // 2
 
-    inp_slice = inputs_np[mid]
-    anom_map = np.abs(inp_slice - recons_np[mid])
+    inp_slice = inputs_np
+    anom_map = np.abs(inp_slice - recons_np)
     threshold = anom_map.mean() + 2 * anom_map.std()
     binary_mask = (anom_map > threshold).astype(np.float32)
 
@@ -171,17 +169,17 @@ def run_epoch(model, loader, criterion, optimizer, device, training=True):
 
 
 def train(dataset_root):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda")
     print(f"Using device: {device}")
 
-    train_loader, val_loader = get_dataloaders(dataset_root, batch_size=BATCH_SIZE)
+    train_loader, val_loader, _ = get_dataloaders(dataset_root, batch_size=BATCH_SIZE, liver_crop=True)
 
     if len(train_loader.dataset) == 0:
         print("No training data found. Check dataset path.")
         return
 
     model = build_model(device)
-    criterion = CombinedLoss()
+    criterion = CombinedLoss().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
 
