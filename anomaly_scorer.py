@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 anomaly_scorer.py  (v2)
 ========================
@@ -80,9 +79,7 @@ def validate_liver_mask(liver_mask:    np.ndarray | None,
     return combined.astype(np.float32), 'ok'
 
 
-# -------------------------------------------------------------------------
 # Scoring primitives
-# -------------------------------------------------------------------------
 
 def quantile_score(error_map:     np.ndarray,
                    liver_mask:    np.ndarray | None = None,
@@ -139,10 +136,7 @@ def postprocess_mask(binary_mask:   np.ndarray,
     return clean
 
 
-# -------------------------------------------------------------------------
 # High-level scorer
-# -------------------------------------------------------------------------
-
 class AnomalyScorer:
     """
     Full pipeline: error_map + liver_mask
@@ -185,9 +179,7 @@ class AnomalyScorer:
         return s, t, clean
 
 
-# -------------------------------------------------------------------------
 # Thresholds (recalibrate on val set after retraining with liver_crop)
-# -------------------------------------------------------------------------
 
 THRESHOLDS_Q95 = {
     'conv_ae'  : 0.025,
