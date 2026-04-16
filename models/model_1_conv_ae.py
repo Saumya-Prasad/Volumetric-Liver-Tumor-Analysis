@@ -22,9 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# ──────────────────────────────────────────────
 # Building blocks
-# ──────────────────────────────────────────────
 
 def conv_block(in_ch, out_ch, stride=2):
     return nn.Sequential(
@@ -43,10 +41,7 @@ def deconv_block(in_ch, out_ch):
         nn.ReLU(inplace=True),
     )
 
-
-# ──────────────────────────────────────────────
 # Model
-# ──────────────────────────────────────────────
 
 class ConvAutoencoder(nn.Module):
     """
@@ -86,11 +81,7 @@ class ConvAutoencoder(nn.Module):
     def encode(self, x):
         return self.encoder(x)
 
-
-# ──────────────────────────────────────────────
 # Anomaly scoring
-# ──────────────────────────────────────────────
-
 def anomaly_score(model: ConvAutoencoder,
                   x: torch.Tensor) -> tuple:
     """
@@ -109,9 +100,7 @@ def anomaly_score(model: ConvAutoencoder,
     return score, error_map, x_hat
 
 
-# ──────────────────────────────────────────────
 # Quick test
-# ──────────────────────────────────────────────
 
 if __name__ == '__main__':
     m = ConvAutoencoder()
