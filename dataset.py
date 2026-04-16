@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 dataset.py
 CHAOS CT Dataset Loader with HU preprocessing.
@@ -108,7 +107,7 @@ class CHAOSDataset(Dataset):
         self.liver_only  = liver_only or liver_crop   # crop implies masking
         self.liver_crop  = liver_crop
 
-        # ── Gather all .dcm paths recursively ────────────────────────
+        # ── Gather all .dcm paths recursively
         all_dcm = sorted(glob.glob(
             os.path.join(root_path, '**', '*.dcm'), recursive=True))
 
@@ -117,7 +116,7 @@ class CHAOSDataset(Dataset):
                 f"No .dcm files found under {root_path}. "
                 "Check your kagglehub download path.")
 
-        # ── Deterministic 80 / 10 / 10 split ─────────────────────────
+        # ── Deterministic 80 / 10 / 10 split 
         random.seed(42)
         shuffled = random.sample(all_dcm, len(all_dcm))
         n        = len(shuffled)
@@ -128,7 +127,7 @@ class CHAOSDataset(Dataset):
         }
         self.files = splits[split]
 
-        # ── Liver-mode: filter to slices that contain the liver ───────
+        # ── Liver-mode: filter to slices that contain the liver
         if self.liver_only:
             pre_filter = len(self.files)
             # has_liver_mask() is fast (checks PNG on disk, no DICOM load).
@@ -153,24 +152,22 @@ class CHAOSDataset(Dataset):
         print(f"[CHAOSDataset] split={split}  slices={len(self.files)}"
               f"  liver_only={self.liver_only}  liver_crop={self.liver_crop}")
 
-        # ── Augmentation transforms ───────────────────────────────────
+        # ── Augmentation transforms
         self.tf_aug = transforms.Compose([
             transforms.RandomHorizontalFlip(),
             transforms.RandomVerticalFlip(),
             transforms.RandomRotation(10),
         ])
 
-    # ──────────────────────────────────────────
     def __len__(self):
         return len(self.files)
 
-    # ──────────────────────────────────────────
     def __getitem__(self, idx: int) -> torch.Tensor:
         path = self.files[idx]
         img  = preprocess_dicom(path, target_size=self.target_size)
         # img: (H, W) float32 in [0, 1]
 
-        # ── Liver masking / crop ──────────────────────────────────────
+        # ── Liver masking / crop
         if self.liver_only:
             mask = get_liver_mask(path, target_size=self.target_size)
             # mask: (H, W) float32 binary {0.0, 1.0}
@@ -185,10 +182,10 @@ class CHAOSDataset(Dataset):
                 # Simple, works with existing checkpoints, no retraining.
                 img = img * mask
 
-        # ── Tensor conversion  (H, W) → (1, H, W) ───────────────────
+        # ── Tensor conversion  (H, W) → (1, H, W) 
         tensor = torch.from_numpy(img).unsqueeze(0)    # float32, [0,1]
 
-        # ── Augmentation (training only) ──────────────────────────────
+        # ── Augmentation (training only) 
         if self.augment:
             pil    = transforms.ToPILImage()(tensor)
             pil    = self.tf_aug(pil)
@@ -242,20 +239,20 @@ if __name__ == '__main__':
         "omarxadel/chaos-combined-ct-mr-healthy-abdominal-organ")
     print("Dataset path:", path)
 
-    # --- Standard mode --------------------------------------------------
+    # --- Standard mode
     tl, vl, testl = get_dataloaders(path, target_size=256, batch_size=8)
     batch = next(iter(tl))
     print("Standard  — Batch shape:", batch.shape,
           " Min/Max:", batch.min().item(), batch.max().item())
 
-    # --- Liver-only mode (mask) -----------------------------------------
+    # --- Liver-only mode (mask) 
     tl2, _, _ = get_dataloaders(path, target_size=256, batch_size=8,
                                 liver_only=True)
     batch2 = next(iter(tl2))
     print("liver_only — Batch shape:", batch2.shape,
           " Non-zero px:", (batch2 > 0).float().mean().item())
 
-    # --- Liver-crop mode ------------------------------------------------
+    # --- Liver-crop mode 
     tl3, _, _ = get_dataloaders(path, target_size=256, batch_size=8,
                                 liver_crop=True)
     batch3 = next(iter(tl3))
