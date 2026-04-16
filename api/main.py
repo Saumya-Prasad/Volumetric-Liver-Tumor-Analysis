@@ -84,6 +84,7 @@ AVAILABLE_MODELS = {
     'ccb_aae'  : 'ccb_aae_best.pt',
     'qformer'  : 'qformer_ae_best.pt',
     'ensemble' : 'ensemble_ae_best.pt',
+    'attention_ae': 'attention_ae_liver_crop_best.pt',
 }
 
 MODEL_DESCRIPTIONS = {
@@ -93,6 +94,7 @@ MODEL_DESCRIPTIONS = {
     'ccb_aae'  : 'Improved Adversarial AE with CCB (J. Digital Imaging 2022)',
     'qformer'  : 'Q-Former Autoencoder with DINOv2 (arXiv 2025)',
     'ensemble' : 'Ensemble of 4 diverse autoencoders',
+    'attention_ae': 'Spatial Attention AE with Multi-Domain Loss',
 }
 
 
@@ -180,15 +182,19 @@ def _make_overlay(preprocessed: np.ndarray,
                   model_name: str) -> np.ndarray:
     """Red overlay on detected regions."""
     # Use the calibrated threshold for this specific model
-    fixed_threshold = float(THRESHOLDS_LIVER.get(model_name, 0.02))
+    # SPECIAL CASE: masked_ae threshold (0.35) is a probability, not a pixel intensity.
+    # We use a standard intensity floor (0.05) for its visual overlay.
+    if model_name == 'masked_ae':
+        fixed_threshold = 0.05
+    else:
+        fixed_threshold = float(THRESHOLDS_LIVER.get(model_name, 0.02))
     
     # Only calculate stats on non-zero liver pixels to avoid background dilution
     active_errors = error_map[error_map > 1e-6]
     if len(active_errors) > 0:
-        # Blend the fixed threshold with a local adaptive percentile to handle varying intensities
-        p70 = float(np.percentile(active_errors, 70))
-        # if the model is very confident (score >> threshold), we trust the percentile less
-        threshold = max(fixed_threshold, min(p70, fixed_threshold * 1.5))
+        # Strictly use the calibrated fixed threshold for this model
+        # This allows users to see the actual sensitivity differences between models
+        threshold = fixed_threshold
     else:
         threshold = fixed_threshold
         
@@ -258,6 +264,7 @@ def process_dicom_bytes(dicom_bytes: bytes, model_name: str, img_size: int, incl
         # Rescale Error Map outwards if physically cropped, else zero-shift.
         if LIVER_CROP_MODE:
             emap_np = uncrop_error_map(emap_np, bbox, full_size=img_size)
+            xh_np   = uncrop_error_map(xh_np,   bbox, full_size=img_size)
             
         # CRITICAL: Always zero-out pixels outside the anatomical mask to prevent 
         # background noise (lungs/air/spine) from being detected as anomalies.

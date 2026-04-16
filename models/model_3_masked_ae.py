@@ -387,8 +387,8 @@ def anomaly_score(mae: MaskedAutoencoder,
     mae.eval(); classifier.eval()
     with torch.no_grad():
         x_hat     = mae.reconstruct(x)
-        # Darkness-only: Highlight where Healthy (x_hat) > Actual (x)
-        error_map = torch.clamp(x_hat - x, min=1e-6)
+        # Standard absolute error for better visibility with fixed thresholds
+        error_map = torch.abs(x - x_hat)
         prob      = classifier(error_map)
     return prob, error_map, x_hat
 

@@ -124,16 +124,16 @@
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:text="AI OVERLAY"
-                android:textSize="10sp"
+                android:text="OVERLAY"
+                android:textSize="8sp"
                 app:strokeColor="#30FFFFFF"
                 android:textColor="@color/white" />
 
             <com.google.android.material.button.MaterialButton
-                android:id="@+id/btnHeatmap"
+                android:id="@+id/btnRecon"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="0dp"
-                android:layout_weight="1.5"
+                android:layout_weight="1"
                 android:layout_height="wrap_content"
                 android:text="RECONSTRUCTION"
                 android:textSize="9sp"

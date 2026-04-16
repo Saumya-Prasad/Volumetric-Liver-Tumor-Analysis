@@ -123,11 +123,19 @@ def load_model(model_name: str, ckpt_path: str):
         m = QFormerAE(in_ch=1, base=32, M=64, d_q=256)
     elif name == 'ensemble':
         m = EnsembleAE(in_ch=1, img_size=256)
+    elif name == 'attention_ae':
+        # Import here to avoid circular dependencies if any
+        from models.model import AttentionAutoencoder2D
+        m = AttentionAutoencoder2D(in_channels=1, base_filters=32, latent_channels=256)
     else:
         raise ValueError(f"Unknown model: {model_name}")
 
     ckpt = torch.load(ckpt_path, map_location=DEVICE)
-    m.load_state_dict(ckpt['model'])
+    if isinstance(ckpt, dict) and 'model' in ckpt:
+        state_dict = ckpt['model']
+    else:
+        state_dict = ckpt
+    m.load_state_dict(state_dict)
     return m.to(DEVICE)
 
 
@@ -160,6 +168,11 @@ def run_inference(model, model_name: str, x: torch.Tensor,
         # Average all members for a smooth, high-quality reconstruction
         xh_tensors = model.reconstruct_all(x)
         xh = torch.stack(xh_tensors).mean(0)
+    elif name == 'attention_ae':
+        # For Attention AE, we use the standard L1 error map
+        xh = model(x)
+        emap = torch.abs(x - xh)
+        s = emap.mean(dim=[1, 2, 3])
     else:
         raise ValueError(name)
 

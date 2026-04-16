@@ -20,7 +20,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private val viewModel: AnomalyViewModel by viewModels()
 
-    private val models = arrayOf("conv_ae", "ae_flow", "masked_ae", "ccb_aae", "qformer", "ensemble", "ALL MODELS")
+    private val models = arrayOf("conv_ae", "ae_flow", "masked_ae", "ccb_aae", "qformer", "ensemble", "attention_ae", "ALL MODELS")
 
     private val selectDicomLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
@@ -119,9 +119,9 @@ class MainActivity : AppCompatActivity() {
                         decodeAndBind(result.images.overlay, ivViewer)
                         tvFrameLabel.text = "AI OVERLAY"
                     }
-                    R.id.btnHeatmap -> {
-                        decodeAndBind(result.images.error_map, ivViewer)
-                        tvFrameLabel.text = "ERROR INTENSITY HEATMAP"
+                    R.id.btnRecon -> {
+                        decodeAndBind(result.images.reconstruction, ivViewer)
+                        tvFrameLabel.text = "HEALTHY RECONSTRUCTION"
                     }
                 }
             }
