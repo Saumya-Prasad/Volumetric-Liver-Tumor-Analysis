@@ -133,10 +133,10 @@
                 android:id="@+id/btnHeatmap"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="0dp"
-                android:layout_weight="1"
+                android:layout_weight="1.5"
                 android:layout_height="wrap_content"
-                android:text="DIFF"
-                android:textSize="10sp"
+                android:text="RECONSTRUCTION"
+                android:textSize="9sp"
                 app:strokeColor="#30FFFFFF"
                 android:textColor="@color/white" />
 

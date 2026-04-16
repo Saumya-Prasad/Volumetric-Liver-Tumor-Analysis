@@ -157,7 +157,9 @@ def run_inference(model, model_name: str, x: torch.Tensor,
     elif name == 'ensemble':
         scorer = EnsembleScorer(model)
         s, emap, _ = scorer.score(x)
-        xh = model.reconstruct_all(x)[0]
+        # Average all members for a smooth, high-quality reconstruction
+        xh_tensors = model.reconstruct_all(x)
+        xh = torch.stack(xh_tensors).mean(0)
     else:
         raise ValueError(name)
 

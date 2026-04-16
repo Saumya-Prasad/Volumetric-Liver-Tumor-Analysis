@@ -120,8 +120,8 @@ class MainActivity : AppCompatActivity() {
                         tvFrameLabel.text = "AI OVERLAY"
                     }
                     R.id.btnHeatmap -> {
-                        decodeAndBind(result.images.error_map, ivViewer)
-                        tvFrameLabel.text = "RESIDUAL DIFF"
+                        decodeAndBind(result.images.reconstruction, ivViewer)
+                        tvFrameLabel.text = "HEALTHY RECONSTRUCTION"
                     }
                 }
             }

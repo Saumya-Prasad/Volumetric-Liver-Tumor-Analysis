@@ -141,7 +141,13 @@ def _np_to_b64(arr: np.ndarray, fmt='PNG') -> str:
     if arr_uint8.ndim == 3 and arr_uint8.shape[2] == 3:
         pil = Image.fromarray(arr_uint8, 'RGB')
     else:
+        # For grayscale (L), we apply a small contrast normalization if pixel range is tight
         pil = Image.fromarray(arr_uint8, 'L')
+        # If it's a reconstruction, optimize the brightness to match clinical expectations
+        if arr.max() < 0.6:  # If image is too dim
+            from PIL import ImageEnhance
+            enhancer = ImageEnhance.Contrast(pil)
+            pil = enhancer.enhance(1.4) # 40% boost for better medical visibility
     buf = io.BytesIO()
     pil.save(buf, format=fmt)
     return base64.b64encode(buf.getvalue()).decode('utf-8')
@@ -178,9 +184,12 @@ def _make_overlay(preprocessed: np.ndarray,
         # Lowered to 85th percentile to increase sensitivity to smaller dark tumors
         threshold = float(np.percentile(active_errors, 85))
     else:
-        threshold = 1.0  # Safe block
+        threshold = max(threshold, 0.005) # noise floor
         
-    binary_mask  = (error_map > threshold)
+    # Black Exclusion Filter: Ignore anomalies in air/gas regions (HU < -40)
+    # real tumors are hypo-dense soft-tissue, not air/gas cavities.
+    is_not_black = (preprocessed > 0.2)
+    binary_mask  = (error_map > threshold) & is_not_black
     rgb          = np.stack([preprocessed]*3, axis=-1)
     overlay      = rgb.copy()
     overlay[binary_mask, 0] = 1.0
@@ -334,7 +343,7 @@ async def predict(
                 if model_name == "ALL MODELS":
                     comparison_results = {m: {'score': -float('inf'), 'label': 'normal', 'images': None} for m in AVAILABLE_MODELS}
                     # We only generate GIFs for the Ensemble model to keep payload small
-                    accumulated_ensemble = {'original': [], 'overlay': [], 'error_map': []}
+                    accumulated_ensemble = {'original': [], 'overlay': [], 'reconstruction': []}
                     
                     for _, b in slices_data:
                         # 1. Run Ensemble for the full visual diagnostic
@@ -359,8 +368,8 @@ async def predict(
                             comparison_results[m]['images'] = {
                                 'original': _make_gif_b64(accumulated_ensemble['original']),
                                 'overlay' : _make_gif_b64(accumulated_ensemble['overlay']),
-                                'error_map': _make_gif_b64(accumulated_ensemble['error_map']),
-                                'preprocessed': "", 'reconstruction': ""
+                                'reconstruction': _make_gif_b64(accumulated_ensemble['reconstruction']),
+                                'preprocessed': "", 'error_map': ""
                             }
                         else:
                             # Skeletal structure for Android compatibility without the bloat
@@ -377,7 +386,7 @@ async def predict(
                     })
 
                 # --- Handle Single Model Mode -----------------------------
-                accumulated = {'original': [], 'overlay': []} 
+                accumulated = {'original': [], 'overlay': [], 'reconstruction': []} 
                 max_score, final_label = -float('inf'), 'normal'
                 for _, b in slices_data:
                     r = process_dicom_bytes(b, model_name, img_size, include_images=True)
@@ -395,7 +404,8 @@ async def predict(
                     'images': {
                         'original': _make_gif_b64(accumulated['original']),
                         'overlay': _make_gif_b64(accumulated['overlay']),
-                        'preprocessed': "", 'reconstruction': "", 'error_map': ""
+                        'reconstruction': _make_gif_b64(accumulated['reconstruction']),
+                        'preprocessed': "", 'error_map': ""
                     }
                 })
         else:
