@@ -169,9 +169,7 @@ def run_inference(model, model_name: str, x: torch.Tensor,
     return score_val, emap_np, xh_np
 
 
-# ─────────────────────────────────────────────
 # Liver-aware score computation
-# ─────────────────────────────────────────────
 
 def apply_liver_mask_to_score(error_map_np: np.ndarray,
                                liver_mask:  np.ndarray) -> tuple[float, np.ndarray]:
