@@ -1,6 +1,4 @@
-# -*- coding: utf-8 -*-
 """
-train.py
 Unified training script for all 6 anomaly-detection models.
 
 Usage
@@ -64,7 +62,7 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 import kagglehub
 
-# ── local imports ────────────────────────────
+# ── local imports 
 from dataset import get_dataloaders
 from models.model_1_conv_ae   import ConvAutoencoder
 from models.model_2_ae_flow   import AEFlow, AEFlowLoss
@@ -74,14 +72,11 @@ from models.model_4_ccb_aae   import CCBAAE, CCBAAELoss
 from models.model_5_qformer_ae import QFormerAE
 from models.model_6_ensemble_ae import EnsembleAE
 
-# ─────────────────────────────────────────────
+# Global Device (Gated for Windows Spawning)
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-print(f"[train.py] Using device: {DEVICE}")
 
 
-# ─────────────────────────────────────────────
 # Helpers
-# ─────────────────────────────────────────────
 
 def save_ckpt(model, path, extra=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -119,10 +114,7 @@ def ckpt_name(base: str, save_dir: str, liver_crop: bool,
         suffix = ''
     return os.path.join(save_dir, f"{base}{suffix}_best.pt")
 
-
-# ─────────────────────────────────────────────
 # 1.  Conv-AE trainer
-# ─────────────────────────────────────────────
 
 def train_conv_ae(train_loader, val_loader, epochs, lr, save_dir,
                   liver_crop=False, liver_only=False):
@@ -168,10 +160,7 @@ def train_conv_ae(train_loader, val_loader, epochs, lr, save_dir,
     json.dump(log, open(log_base, 'w'))
     return model
 
-
-# ─────────────────────────────────────────────
 # 2.  AE-FLOW trainer
-# ─────────────────────────────────────────────
 
 def train_ae_flow(train_loader, val_loader, epochs, lr, save_dir,
                   liver_crop=False, liver_only=False):
@@ -217,11 +206,7 @@ def train_ae_flow(train_loader, val_loader, epochs, lr, save_dir,
     json.dump(log, open(ckpt_path.replace('_best.pt', '_log.json'), 'w'))
     return model
 
-
-# ─────────────────────────────────────────────
 # 3.  Masked AE trainer (2-stage)
-# ─────────────────────────────────────────────
-
 def train_masked_ae(train_loader, val_loader, epochs, lr, save_dir,
                     liver_crop=False, liver_only=False):
     # Stage 1: MAE pre-training
@@ -307,10 +292,7 @@ def train_masked_ae(train_loader, val_loader, epochs, lr, save_dir,
     json.dump(log, open(ckpt_path.replace('_best.pt', '_log.json'), 'w'))
     return mae, clf
 
-
-# ─────────────────────────────────────────────
 # 4.  CCB-AAE trainer
-# ─────────────────────────────────────────────
 
 def train_ccb_aae(train_loader, val_loader, epochs, lr, save_dir,
                   liver_crop=False, liver_only=False):
@@ -366,11 +348,8 @@ def train_ccb_aae(train_loader, val_loader, epochs, lr, save_dir,
 
     json.dump(log, open(ckpt_path.replace('_best.pt', '_log.json'), 'w'))
     return model
-
-
-# ─────────────────────────────────────────────
+                      
 # 5.  Q-Former AE trainer
-# ─────────────────────────────────────────────
 
 def train_qformer(train_loader, val_loader, epochs, lr, save_dir,
                   liver_crop=False, liver_only=False):
@@ -417,9 +396,7 @@ def train_qformer(train_loader, val_loader, epochs, lr, save_dir,
     return model
 
 
-# ─────────────────────────────────────────────
 # 6.  Ensemble AE trainer
-# ─────────────────────────────────────────────
 
 def train_ensemble(train_loader, val_loader, epochs, lr, save_dir,
                    liver_crop=False, liver_only=False):
@@ -466,9 +443,7 @@ def train_ensemble(train_loader, val_loader, epochs, lr, save_dir,
     return model
 
 
-# ─────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────
 
 TRAINERS = {
     'conv_ae'  : train_conv_ae,
@@ -507,6 +482,9 @@ def main():
              'Requires full retraining but produces the best anomaly scores.')
 
     args = parser.parse_args()
+    
+    # Master process prints only (Prevents Windows Spawn flooding)
+    print(f"[train.py] Using device: {DEVICE}")
 
     # Print liver mode clearly so logs are unambiguous
     if args.liver_crop:
