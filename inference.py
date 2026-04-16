@@ -76,7 +76,7 @@ import matplotlib.cm as cm
 from PIL import Image
 import pydicom
 
-# ── local imports ────────────────────────────
+# ── local imports 
 from dataset import preprocess_dicom
 from liver_segmenter import get_liver_mask, crop_to_liver, uncrop_error_map
 
@@ -95,9 +95,8 @@ from models.model_6_ensemble_ae import EnsembleAE, EnsembleScorer
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 
-# ─────────────────────────────────────────────
 # Model registry
-# ─────────────────────────────────────────────
+
 
 def load_model(model_name: str, ckpt_path: str):
     """Instantiate + load weights."""
@@ -213,9 +212,7 @@ def apply_liver_mask_to_score(error_map_np: np.ndarray,
     return liver_score, masked_emap
 
 
-# ─────────────────────────────────────────────
 # Threshold calibration (set per model on val data)
-# ─────────────────────────────────────────────
 
 # Thresholds tuned on global (full-image) error:
 THRESHOLDS_GLOBAL = {
@@ -246,9 +243,7 @@ def classify(score: float, model_name: str, liver_mode: bool = False) -> str:
     return 'tumor' if score > thr else 'normal'
 
 
-# ─────────────────────────────────────────────
 # Visualisation helpers
-# ─────────────────────────────────────────────
 
 def save_results(original_np:     np.ndarray,
                  preprocessed_np: np.ndarray,
@@ -283,11 +278,8 @@ def save_results(original_np:     np.ndarray,
     binary_mask = (error_map_np > threshold).astype(np.uint8)
 
     # ── Save individual images ────────────────
-    def _save(arr: np.ndarray, name: str):
-        if arr.ndim == 3:
-            img = Image.fromarray((arr * 255).astype(np.uint8))
-        else:
-            img = Image.fromarray((arr * 255).astype(np.uint8))
+    def _save(arr, name):
+        img = Image.fromarray((arr * 255).astype(np.uint8))
         img.save(os.path.join(save_dir, name))
 
     _save(original_np,     'original.png')
@@ -411,9 +403,7 @@ def compare_models(x_tensor:        torch.Tensor,
     return results
 
 
-# ─────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description='Liver Anomaly Inference')

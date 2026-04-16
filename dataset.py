@@ -1,38 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 dataset.py
-CHAOS CT Dataset Loader with HU preprocessing + optional liver ROI focus.
-
-Key addition vs. the original file
-------------------------------------
-Two new parameters on ``CHAOSDataset`` control how slices are presented to
-the model:
-
-  liver_only (bool, default False)
-    Zero-out every pixel outside the liver mask.  The AE still receives a
-    256×256 image, but background, ribs, and spine are silenced.  Works
-    with *any* existing checkpoint — no retraining required.  Good for a
-    quick first fix.
-
-  liver_crop (bool, default False)
-    Stronger option: crop the image to the liver bounding box and resize
-    to target_size.  The AE now only ever sees liver parenchyma at full
-    resolution.  Requires retraining, but the reconstruction error is
-    entirely liver-specific, so tumour-induced deviations dominate the
-    anomaly score.
-
-  --liver_crop implies liver_only (cropped image already contains only
-    liver pixels; there is nothing else to mask).
-
-Slice filtering (when liver_only or liver_crop is active)
-----------------------------------------------------------
-Slices that do *not* intersect the liver are useless for training an
-organ-specific AE and actively harmful (they teach the model to reconstruct
-non-liver tissue as if it were normal).  During ``__init__``, we filter the
-file list to slices that have a non-empty CHAOS ground-truth mask.  For
-slices without GT masks (non-CHAOS scans, inference-time data), the full
-image is returned and ``liver_segmenter.hu_liver_mask`` is used as fallback
-in ``__getitem__``.
+CHAOS CT Dataset Loader with HU preprocessing.
+Downloads from Kaggle and provides PyTorch DataLoaders.
 """
 
 import os
@@ -48,9 +18,7 @@ from PIL import Image
 from liver_segmenter import get_liver_mask, crop_to_liver, has_liver_mask
 
 
-# ──────────────────────────────────────────────
 # 1.  DICOM  →  Normalised numpy [0,1]
-# ──────────────────────────────────────────────
 
 def preprocess_dicom(dcm_path: str,
                      window_min: int = -100,
@@ -100,9 +68,7 @@ def load_volume(patient_dir: str, **kw) -> list:
     return imgs
 
 
-# ──────────────────────────────────────────────
 # 2.  PyTorch Dataset
-# ──────────────────────────────────────────────
 
 class CHAOSDataset(Dataset):
     """
@@ -231,9 +197,7 @@ class CHAOSDataset(Dataset):
         return tensor   # float32, shape (1, H, W), values [0,1]
 
 
-# ──────────────────────────────────────────────
 # 3.  Convenience factory
-# ──────────────────────────────────────────────
 
 def get_dataloaders(root_path:   str,
                     target_size: int  = 256,
@@ -271,10 +235,7 @@ def get_dataloaders(root_path:   str,
 
     return train_loader, val_loader, test_loader
 
-
-# ──────────────────────────────────────────────
 # Quick smoke-test
-# ──────────────────────────────────────────────
 if __name__ == '__main__':
     import kagglehub
     path = kagglehub.dataset_download(
