@@ -352,7 +352,8 @@ def anomaly_score(model: QFormerAE, x: torch.Tensor) -> tuple:
     model.eval()
     with torch.no_grad():
         x_hat = model.reconstruct(x)
-        error_map = (x - x_hat).abs()
+        # Hypo-dense focus: Healthy (x_hat) > Actual (x)
+        error_map = torch.clamp(x_hat - x, min=1e-6)
         l_mse  = error_map.pow(2).mean(dim=[1,2,3])
         l_p    = model.perceptual(x, x_hat)
         score  = l_mse + model.lam_p * l_p

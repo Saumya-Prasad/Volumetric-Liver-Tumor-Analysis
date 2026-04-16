@@ -103,7 +103,8 @@ def anomaly_score(model: ConvAutoencoder,
     model.eval()
     with torch.no_grad():
         x_hat     = model(x)
-        error_map = (x - x_hat).abs()            # |x - x̂|
+        # Focus on "missing density": where reconstruction (healthy) > input (dark lesion)
+        error_map = torch.clamp(x_hat - x, min=1e-6)
         score     = error_map.mean(dim=[1,2,3])  # scalar per image
     return score, error_map, x_hat
 

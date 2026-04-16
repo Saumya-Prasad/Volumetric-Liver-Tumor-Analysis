@@ -102,34 +102,47 @@ def hu_liver_mask(dicom_path: str,
     intercept = float(getattr(dcm, 'RescaleIntercept', 0))
     hu        = pix * slope + intercept
 
+    # --- Soft-tissue threshold + Cleaning --------------------------------
     soft   = ((hu >= hu_low) & (hu <= hu_high)).astype(np.uint8)
-    struct = ndimage.generate_binary_structure(2, 1)
-    soft   = ndimage.binary_closing(soft, structure=struct, iterations=4)
     soft   = ndimage.binary_fill_holes(soft).astype(np.uint8)
+    
+    # Aggressively erode to sever muscle/fat connections
+    eroded = ndimage.binary_erosion(soft, iterations=10)
 
-    labeled, n = ndimage.label(soft)
+    # --- Anatomical Filtering: Favor Image-Left (Patient-Right) -----------
+    labeled, n = ndimage.label(eroded)
     if n == 0:
-        # No soft tissue found in HU range [hu_low, hu_high].
-        # CRITICAL: do NOT return np.ones() here — that silently treats the
-        # entire image as "liver" and breaks the threshold computation in
-        # AnomalyScorer (border artifacts dominate the 98th-pct threshold,
-        # causing real tumours to fall below it).
-        # Instead return an interior-only mask (border excluded) as a safe
-        # neutral fallback, and print a clear warning.
-        print(f"  [hu_liver_mask] WARNING: no soft tissue found in HU range "
-              f"[{hu_low}, {hu_high}].  Slice may be outside the liver, or "
-              "RescaleSlope/RescaleIntercept may not be applied. "
-              "Returning interior-only mask (border excluded).")
-        interior = np.ones((target_size, target_size), dtype=np.float32)
-        m = 16
-        interior[:m, :] = 0; interior[-m:, :] = 0
-        interior[:, :m] = 0; interior[:, -m:] = 0
-        return interior
+        # If erosion killed everything, fallback to soft mask without erosion
+        labeled, n = ndimage.label(soft)
+        if n == 0:
+            return np.ones((target_size, target_size), dtype=np.float32)
 
-    sizes   = ndimage.sum(soft, labeled, range(1, n + 1))
-    largest = int(np.argmax(sizes)) + 1
-    liver   = (labeled == largest).astype(np.float32)
-    liver   = ndimage.binary_dilation(liver, iterations=5).astype(np.float32)
+    if n == 1:
+        liver = (labeled == 1).astype(np.float32)
+    else:
+        # Check top 3 components to find the one that looks most like a liver (on the left)
+        component_info = []
+        for i in range(1, n + 1):
+            mask_i  = (labeled == i)
+            size_i  = np.sum(mask_i)
+            com_i   = ndimage.center_of_mass(mask_i) # (y, x)
+            component_info.append({'id': i, 'size': size_i, 'x_center': com_i[1]})
+            
+        # Filter for components that aren't purely on the right side of the image (Stomach/Spleen area)
+        # In a 256px image, x < 160 is a safe threshold for liver bulk.
+        liver_candidates = [c for c in component_info if c['x_center'] < 160]
+        
+        if not liver_candidates:
+            # Fallback to absolute largest if no candidate fits spatial rule
+            largest_id = int(np.argmax([c['size'] for c in component_info])) + 1
+            liver = (labeled == largest_id).astype(np.float32)
+        else:
+            # Pick largest among valid spatial candidates
+            best_candidate = max(liver_candidates, key=lambda x: x['size'])
+            liver = (labeled == best_candidate['id']).astype(np.float32)
+
+    # Restore volume + generous boundary margin
+    liver = ndimage.binary_dilation(liver, iterations=12).astype(np.float32)
 
     pil = Image.fromarray((liver * 255).astype(np.uint8))
     pil = pil.resize((target_size, target_size), Image.NEAREST)

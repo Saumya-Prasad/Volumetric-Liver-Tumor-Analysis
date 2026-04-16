@@ -34,10 +34,10 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, models)
+        val adapter = ArrayAdapter(this, R.layout.spinner_item, models)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.spinnerModels.adapter = adapter
-        binding.spinnerModels.setSelection(5) // default to ensemble
+        binding.spinnerModels.setSelection(2) // default to masked_ae
 
         binding.btnUpload.setOnClickListener {
             // Allows uploading standard DICOM or ZIP folders Native!
@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun observeViewModel() {
         viewModel.isLoading.observe(this) { loading ->
-            binding.progressBar.visibility = if (loading) View.VISIBLE else View.GONE
+            binding.loadingLayout.visibility = if (loading) View.VISIBLE else View.GONE
             binding.btnUpload.isEnabled = !loading
         }
 
@@ -61,7 +61,8 @@ class MainActivity : AppCompatActivity() {
         viewModel.singlePredictionResult.observe(this) { result ->
             if (result == null) return@observe
             binding.llResultsContainer.removeAllViews()
-            binding.tvResultLabel.text = "Volume Analysis: ${result.label.uppercase()}"
+            binding.tvResultLabel.visibility = View.VISIBLE
+            binding.tvResultLabel.text = "DIAGNOSTIC REPORT: ${result.label.uppercase()}"
             binding.tvResultLabel.setTextColor(getColorForLabel(result.label))
             
             addModelCard(result.model, result)
@@ -71,7 +72,8 @@ class MainActivity : AppCompatActivity() {
         viewModel.comparePredictionResult.observe(this) { result ->
             if (result == null) return@observe
             binding.llResultsContainer.removeAllViews()
-            binding.tvResultLabel.text = "Majority Consensus: ${result.majority_vote.uppercase()}"
+            binding.tvResultLabel.visibility = View.VISIBLE
+            binding.tvResultLabel.text = "CONSENSUS REPORT: ${result.majority_vote.uppercase()}"
             binding.tvResultLabel.setTextColor(getColorForLabel(result.majority_vote))
 
             result.model_results.forEach { (modelName, prediction) ->
@@ -88,31 +90,58 @@ class MainActivity : AppCompatActivity() {
         val tvName = cardView.findViewById<TextView>(R.id.tvModelName)
         val tvScore = cardView.findViewById<TextView>(R.id.tvModelScore)
         val tvLabel = cardView.findViewById<TextView>(R.id.tvModelLabel)
-        val ivOrig = cardView.findViewById<ImageView>(R.id.ivOriginal)
-        val ivOverlay = cardView.findViewById<ImageView>(R.id.ivOverlay)
+        val badgeStatus = cardView.findViewById<View>(R.id.badgeStatus)
+        val ivViewer = cardView.findViewById<ImageView>(R.id.ivViewer)
+        val tvFrameLabel = cardView.findViewById<TextView>(R.id.tvFrameLabel)
+        val toggleGroup = cardView.findViewById<com.google.android.material.button.MaterialButtonToggleGroup>(R.id.toggleGroup)
 
-        tvName.text = modelName.uppercase()
-        tvScore.text = "Score: ${result.score}"
+        tvName.text = modelName.replace("_", " ").uppercase()
+        tvScore.text = "CONFIDENCE SCORE: ${String.format("%.3f", result.score)}"
         tvLabel.text = result.label.uppercase()
-        tvLabel.setTextColor(getColorForLabel(result.label))
+        
+        val diagColor = getColorForLabel(result.label)
+        tvLabel.setTextColor(diagColor)
+        badgeStatus.backgroundTintList = android.content.res.ColorStateList.valueOf(diagColor).withAlpha(40)
 
-        decodeAndBind(result.images.original, ivOrig)
-        decodeAndBind(result.images.overlay, ivOverlay)
+        // Initial State: Show Overlay
+        toggleGroup.check(R.id.btnOverlay)
+        decodeAndBind(result.images.overlay, ivViewer)
+        tvFrameLabel.text = "AI OVERLAY"
+
+        toggleGroup.addOnButtonCheckedListener { group, checkedId, isChecked ->
+            if (isChecked) {
+                when (checkedId) {
+                    R.id.btnOriginal -> {
+                        decodeAndBind(result.images.original, ivViewer)
+                        tvFrameLabel.text = "ANATOMY"
+                    }
+                    R.id.btnOverlay -> {
+                        decodeAndBind(result.images.overlay, ivViewer)
+                        tvFrameLabel.text = "AI OVERLAY"
+                    }
+                    R.id.btnHeatmap -> {
+                        decodeAndBind(result.images.error_map, ivViewer)
+                        tvFrameLabel.text = "RESIDUAL DIFF"
+                    }
+                }
+            }
+        }
 
         binding.llResultsContainer.addView(cardView)
     }
 
     private fun getColorForLabel(label: String): Int {
-        return if (label == "tumor") resources.getColor(android.R.color.holo_red_light, theme)
-        else resources.getColor(android.R.color.holo_green_light, theme)
+        return if (label == "tumor") getColor(R.color.diagnostic_red)
+        else getColor(R.color.diagnostic_green)
     }
 
     private fun decodeAndBind(base64Str: String, targetView: ImageView) {
         try {
             val bytes = Base64.decode(base64Str, Base64.DEFAULT)
             if (bytes.isNotEmpty()) {
-                // Glide natively parses GIF bytes out-of-the-box perfectly into loops!
-                Glide.with(this).asGif().load(bytes).into(targetView).clearOnDetach()
+                Glide.with(this)
+                    .load(bytes)
+                    .into(targetView)
             }
         } catch (e: Exception) {
             e.printStackTrace()

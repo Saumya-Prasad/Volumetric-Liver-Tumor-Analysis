@@ -305,9 +305,9 @@ def anomaly_score(model: AEFlow,
     with torch.no_grad():
         x_hat, z_prime, log_det = model(x)
 
-        # Per-image reconstruction error
-        recon_map  = (x - x_hat).pow(2)             # (B,1,H,W)
-        recon_err  = recon_map.mean(dim=[1,2,3])    # (B,)
+        # Hypo-dense focus: reconstruction (healthy) > input (dark spot)
+        recon_map  = torch.clamp(x_hat - x, min=1e-6)  # (B,1,H,W)
+        recon_err  = (recon_map ** 2).mean(dim=[1,2,3])    # (B,)
 
         # Per-image flow score
         hw         = z_prime.shape[2] * z_prime.shape[3]

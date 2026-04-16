@@ -172,13 +172,15 @@ def _get_slice_location(dcm_bytes: bytes) -> float:
 def _make_overlay(preprocessed: np.ndarray,
                   error_map: np.ndarray) -> np.ndarray:
     """Red overlay on detected regions."""
-    active_errors = error_map[error_map > 0]
+    # Only calculate stats on non-zero liver pixels to avoid background dilution
+    active_errors = error_map[error_map > 1e-6]
     if len(active_errors) > 0:
-        threshold = float(np.percentile(active_errors, 90))
+        # Lowered to 85th percentile to increase sensitivity to smaller dark tumors
+        threshold = float(np.percentile(active_errors, 85))
     else:
-        threshold = 100.0  # Safe block
+        threshold = 1.0  # Safe block
         
-    binary_mask  = error_map > threshold
+    binary_mask  = (error_map > threshold)
     rgb          = np.stack([preprocessed]*3, axis=-1)
     overlay      = rgb.copy()
     overlay[binary_mask, 0] = 1.0
@@ -198,7 +200,7 @@ def _make_heatmap(error_map: np.ndarray) -> np.ndarray:
 # Shared DICOM processing
 # ─────────────────────────────────────────────
 
-def process_dicom_bytes(dicom_bytes: bytes, model_name: str, img_size: int):
+def process_dicom_bytes(dicom_bytes: bytes, model_name: str, img_size: int, include_images: bool = True):
     """Core logic: bytes → prediction result dict."""
     # Save to temp file (pydicom needs a path)
     with tempfile.NamedTemporaryFile(suffix='.dcm', delete=False) as tmp:
@@ -235,35 +237,36 @@ def process_dicom_bytes(dicom_bytes: bytes, model_name: str, img_size: int):
         # Rescale Error Map outwards if physically cropped, else zero-shift.
         if LIVER_CROP_MODE:
             emap_np = uncrop_error_map(emap_np, bbox, full_size=img_size)
-        else:
-            emap_np = emap_np * mask
+            
+        # CRITICAL: Always zero-out pixels outside the anatomical mask to prevent 
+        # background noise (lungs/air/spine) from being detected as anomalies.
+        emap_np = emap_np * mask
+        
+        # Diagnostic print to help verify mask quality in the terminal
+        coverage = float(mask.mean() * 100)
+        print(f"  [API] Liver Coverage: {coverage:.1f}% | Anomaly Thresholding Focused")
             
         label = classify(score, model_name, liver_mode=True)
 
-        overlay = _make_overlay(prep, emap_np)
-        heatmap = _make_heatmap(emap_np)
+        res = {
+            'score'          : float(score),
+            'label'          : str(label),
+            'model'          : str(model_name),
+            'threshold'      : float(THRESHOLDS_LIVER.get(model_name, 0.02))
+        }
 
-        return {
-            'score'          : round(score, 6),
-            'label'          : label,
-            'model'          : model_name,
-            'threshold'      : THRESHOLDS_LIVER.get(model_name, 0.02),
-            'images': {
+        if include_images:
+            overlay = _make_overlay(prep, emap_np)
+            heatmap = _make_heatmap(emap_np)
+            res['images'] = {
                 'original'     : _np_to_b64(raw_pil),
                 'preprocessed' : _np_to_b64(prep),
                 'reconstruction': _np_to_b64(xh_np),
                 'error_map'    : _np_to_b64(heatmap),
                 'overlay'      : _np_to_b64(overlay),
-            },
-            'dicom_metadata': {
-                'patient_id'   : str(getattr(dcm, 'PatientID',  'N/A')),
-                'modality'     : str(getattr(dcm, 'Modality',   'CT')),
-                'slice_loc'    : float(dcm.ImagePositionPatient[2])
-                                 if hasattr(dcm, 'ImagePositionPatient') else None,
-                'pixel_spacing': list(dcm.PixelSpacing)
-                                 if hasattr(dcm, 'PixelSpacing') else None,
             }
-        }
+            
+        return res
     finally:
         os.unlink(tmp_path)
 
@@ -303,7 +306,7 @@ async def predict(
     Upload a DICOM slice OR a ZIP volume and get anomaly detection results.
     Returns JSON with score, label, and base64 images (PNGs or Animated GIFs depending on input).
     """
-    if model_name not in AVAILABLE_MODELS:
+    if model_name != "ALL MODELS" and model_name not in AVAILABLE_MODELS:
         raise HTTPException(400, f"Unknown model '{model_name}'.")
 
     try:
@@ -318,12 +321,66 @@ async def predict(
                     b = z.read(n)
                     slices_data.append((_get_slice_location(b), b))
                 slices_data.sort(key=lambda x: x[0])
-
-                accumulated = {'original': [], 'preprocessed': [], 'reconstruction': [], 'error_map': [], 'overlay': []}
-                max_score, final_label = -float('inf'), 'normal'
                 
+                # Sub-sampling logic: 50 frames
+                num_slices = len(slices_data)
+                target_frames = 50
+                if num_slices > target_frames:
+                    indices = [int(i * (num_slices - 1) / (target_frames - 1)) for i in range(target_frames)]
+                    slices_data = [slices_data[idx] for idx in indices]
+                slices_data = slices_data[:target_frames]
+
+                # --- Handle Comparison Mode (ALL MODELS) -----------------
+                if model_name == "ALL MODELS":
+                    comparison_results = {m: {'score': -float('inf'), 'label': 'normal', 'images': None} for m in AVAILABLE_MODELS}
+                    # We only generate GIFs for the Ensemble model to keep payload small
+                    accumulated_ensemble = {'original': [], 'overlay': [], 'error_map': []}
+                    
+                    for _, b in slices_data:
+                        # 1. Run Ensemble for the full visual diagnostic
+                        r_ensemble = process_dicom_bytes(b, 'ensemble', img_size, include_images=True)
+                        for k in accumulated_ensemble:
+                            accumulated_ensemble[k].append(r_ensemble['images'][k])
+                        
+                        # 2. Run all others for the numerical labels/scores ONLY (speed + efficiency)
+                        for m in AVAILABLE_MODELS:
+                            if m == 'ensemble':
+                                r = r_ensemble
+                            else:
+                                r = process_dicom_bytes(b, m, img_size, include_images=False)
+                            
+                            if r['score'] > comparison_results[m]['score']:
+                                comparison_results[m]['score'] = r['score']
+                                comparison_results[m]['label'] = r['label']
+
+                    # Post-process: Add Ensemble GIFs and Skeleton images for others
+                    for m in AVAILABLE_MODELS:
+                        if m == 'ensemble':
+                            comparison_results[m]['images'] = {
+                                'original': _make_gif_b64(accumulated_ensemble['original']),
+                                'overlay' : _make_gif_b64(accumulated_ensemble['overlay']),
+                                'error_map': _make_gif_b64(accumulated_ensemble['error_map']),
+                                'preprocessed': "", 'reconstruction': ""
+                            }
+                        else:
+                            # Skeletal structure for Android compatibility without the bloat
+                            comparison_results[m]['images'] = {
+                                'original': "", 'overlay': "", 'error_map': "", 'preprocessed': "", 'reconstruction': ""
+                            }
+
+                    labels = [v['label'] for v in comparison_results.values()]
+                    majority_vote = 'tumor' if labels.count('tumor') > len(labels) // 2 else 'normal'
+                    
+                    return JSONResponse(content={
+                        'majority_vote': majority_vote,
+                        'model_results': comparison_results
+                    })
+
+                # --- Handle Single Model Mode -----------------------------
+                accumulated = {'original': [], 'overlay': []} 
+                max_score, final_label = -float('inf'), 'normal'
                 for _, b in slices_data:
-                    r = process_dicom_bytes(b, model_name, img_size)
+                    r = process_dicom_bytes(b, model_name, img_size, include_images=True)
                     if r['score'] > max_score:
                         max_score = r['score']
                         final_label = r['label']
@@ -331,15 +388,34 @@ async def predict(
                         accumulated[k].append(r['images'][k])
 
                 return JSONResponse(content={
-                    'score': max_score,
-                    'label': final_label,
-                    'model': model_name,
-                    'threshold': THRESHOLDS_LIVER.get(model_name, 0.02),
-                    'images': {k: _make_gif_b64(accumulated[k]) for k in accumulated}
+                    'score': float(max_score),
+                    'label': str(final_label),
+                    'model': str(model_name),
+                    'threshold': float(THRESHOLDS_LIVER.get(model_name, 0.02)),
+                    'images': {
+                        'original': _make_gif_b64(accumulated['original']),
+                        'overlay': _make_gif_b64(accumulated['overlay']),
+                        'preprocessed': "", 'reconstruction': "", 'error_map': ""
+                    }
                 })
         else:
-            result = process_dicom_bytes(file_bytes, model_name, img_size)
-            return JSONResponse(content=result)
+            if model_name == "ALL MODELS":
+                results = {}
+                # Images only for Ensemble
+                for m in AVAILABLE_MODELS:
+                    include_imgs = (m == 'ensemble')
+                    results[m] = process_dicom_bytes(file_bytes, m, img_size, include_images=include_imgs)
+                
+                labels = [v['label'] for v in results.values()]
+                vote   = 'tumor' if labels.count('tumor') > len(labels) // 2 else 'normal'
+                
+                return JSONResponse(content={
+                    'majority_vote': vote,
+                    'model_results': results
+                })
+            else:
+                result = process_dicom_bytes(file_bytes, model_name, img_size)
+                return JSONResponse(content=result)
 
     except Exception as e:
         traceback.print_exc()
@@ -363,11 +439,9 @@ async def predict_batch(
     for f in files:
         try:
             data   = await f.read()
-            result = process_dicom_bytes(data, model_name, img_size)
-            # Don't embed images in batch response (too large)
-            result_slim = {k: v for k, v in result.items() if k != 'images'}
-            result_slim['filename'] = f.filename
-            slice_results.append(result_slim)
+            result = process_dicom_bytes(data, model_name, img_size, include_images=False)
+            result['filename'] = f.filename
+            slice_results.append(result)
         except Exception as e:
             slice_results.append({'filename': f.filename, 'error': str(e)})
 
@@ -409,16 +483,15 @@ async def predict_zip(
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
             # Drop the strict .dcm extension check to support raw file uploads without extensions
             dcm_files = [n for n in z.namelist() if not n.endswith('/') and '__macosx' not in n.lower() and '.ds_store' not in n.lower()]
-            if not dcm_files:
-                raise HTTPException(400, "No valid files found in ZIP archive.")
-                
+            # Safety limit: don't process more than 50 slices in one go to prevent server timeout
+            dcm_files = dcm_files[:50]
+            
             for dcm_name in dcm_files:
                 try:
                     data = z.read(dcm_name)
-                    result = process_dicom_bytes(data, model_name, img_size)
-                    result_slim = {k: v for k, v in result.items() if k != 'images'}
-                    result_slim['filename'] = dcm_name
-                    slice_results.append(result_slim)
+                    result = process_dicom_bytes(data, model_name, img_size, include_images=False)
+                    result['filename'] = dcm_name
+                    slice_results.append(result)
                 except Exception as e:
                     slice_results.append({'filename': dcm_name, 'error': str(e)})
                     

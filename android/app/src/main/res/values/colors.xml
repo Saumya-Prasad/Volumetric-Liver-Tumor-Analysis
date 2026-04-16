@@ -2,4 +2,11 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="background_deep">#0A0B10</color>
+    <color name="surface_glass">#1AFFFFFF</color>
+    <color name="vibrant_cyan">#00E5FF</color>
+    <color name="diagnostic_red">#FF3D00</color>
+    <color name="diagnostic_green">#00E676</color>
+    <color name="text_secondary">#AAAAAA</color>
+    <color name="button_pink">#FF4081</color>
 </resources>

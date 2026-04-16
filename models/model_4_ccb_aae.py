@@ -275,8 +275,9 @@ def anomaly_score(model: CCBAAE,
     model.eval()
     with torch.no_grad():
         x_hat, z4 = model(x)
-        error_map = (x - x_hat).pow(2)
-        recon_err = error_map.mean(dim=[1,2,3])
+        # Hypo-dense focus: (healthy - actual)
+        error_map = torch.clamp(x_hat - x, min=1e-6)
+        recon_err = (error_map ** 2).mean(dim=[1,2,3])
 
         z_flat    = z4.mean(dim=[2,3])             # (B,C)
         lat_err   = ((z_flat - z_mean.to(x.device)).pow(2)).mean(-1)

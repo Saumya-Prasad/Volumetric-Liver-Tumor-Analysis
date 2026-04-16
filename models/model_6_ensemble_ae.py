@@ -250,7 +250,9 @@ class EnsembleScorer:
                 x_hat, _, _ = m(x)
             else:
                 x_hat = m(x)
-            err = (x - x_hat).pow(2).mean(dim=[1,2,3])  # (B,)
+            # Darkness-only error: reconstruction - input
+            err_map = torch.clamp(x_hat - x, min=1e-6)
+            err = (err_map ** 2).mean(dim=[1,2,3])  # (B,)
             all_errors.append(err)
 
         # Stack: (N_members, B)
@@ -267,7 +269,8 @@ class EnsembleScorer:
                 xh, _, _ = m(x)
             else:
                 xh = m(x)
-            all_maps.append((x - xh).abs())
+            # Darkness-only: Highlight where Healthy (xh) > Actual (x)
+            all_maps.append(torch.clamp(xh - x, min=1e-6))
         emap = torch.stack(all_maps).mean(0)                    # (B,1,H,W)
 
         return score, emap, uncertainty
