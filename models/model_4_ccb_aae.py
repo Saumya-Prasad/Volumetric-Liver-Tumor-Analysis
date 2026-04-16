@@ -275,15 +275,15 @@ def anomaly_score(model: CCBAAE,
     model.eval()
     with torch.no_grad():
         x_hat, z4 = model(x)
-        # Hypo-dense focus: (healthy - actual)
-        error_map = torch.clamp(x_hat - x, min=1e-6)
+        # Bidirectional error captures both hyper-dense and hypo-dense tumors
+        error_map = torch.abs(x - x_hat)
         recon_err = (error_map ** 2).mean(dim=[1,2,3])
 
         z_flat    = z4.mean(dim=[2,3])             # (B,C)
         lat_err   = ((z_flat - z_mean.to(x.device)).pow(2)).mean(-1)
 
         score = alpha * recon_err + beta * lat_err
-    return score, error_map.sqrt(), x_hat
+    return score, error_map, x_hat
 
 
 # ──────────────────────────────────────────────

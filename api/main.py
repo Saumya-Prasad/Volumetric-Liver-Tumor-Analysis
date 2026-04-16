@@ -266,6 +266,12 @@ def process_dicom_bytes(dicom_bytes: bytes, model_name: str, img_size: int, incl
             emap_np = uncrop_error_map(emap_np, bbox, full_size=img_size)
             xh_np   = uncrop_error_map(xh_np,   bbox, full_size=img_size)
             
+        # Anatomical Blending: Since the reconstruction is liver-only, we blend it 
+        # back into the preprocessed background (prep) to provide anatomical context 
+        # and prevent 'jumping' GIF artifacts.
+        complete_recon = prep.copy()
+        complete_recon[mask > 0.5] = xh_np[mask > 0.5]
+            
         # CRITICAL: Always zero-out pixels outside the anatomical mask to prevent 
         # background noise (lungs/air/spine) from being detected as anomalies.
         emap_np = emap_np * mask
@@ -289,7 +295,7 @@ def process_dicom_bytes(dicom_bytes: bytes, model_name: str, img_size: int, incl
             res['images'] = {
                 'original'     : _np_to_b64(raw_pil),
                 'preprocessed' : _np_to_b64(prep),
-                'reconstruction': _np_to_b64(xh_np),
+                'reconstruction': _np_to_b64(complete_recon),
                 'error_map'    : _np_to_b64(heatmap),
                 'overlay'      : _np_to_b64(overlay),
             }
@@ -362,7 +368,10 @@ async def predict(
                 if model_name == "ALL MODELS":
                     comparison_results = {m: {'score': -float('inf'), 'label': 'normal', 'images': None} for m in AVAILABLE_MODELS}
                     # We only generate GIFs for the Ensemble model to keep payload small
-                    accumulated_ensemble = {'original': [], 'overlay': [], 'reconstruction': []}
+                    accumulated_ensemble = {
+                        'original': [], 'overlay': [], 'reconstruction': [],
+                        'preprocessed': [], 'error_map': []
+                    }
                     
                     for _, b in slices_data:
                         # 1. Run Ensemble for the full visual diagnostic
@@ -388,7 +397,8 @@ async def predict(
                                 'original': _make_gif_b64(accumulated_ensemble['original']),
                                 'overlay' : _make_gif_b64(accumulated_ensemble['overlay']),
                                 'reconstruction': _make_gif_b64(accumulated_ensemble['reconstruction']),
-                                'preprocessed': "", 'error_map': ""
+                                'preprocessed': _make_gif_b64(accumulated_ensemble['preprocessed']),
+                                'error_map': _make_gif_b64(accumulated_ensemble['error_map'])
                             }
                         else:
                             # Skeletal structure for Android compatibility without the bloat
@@ -405,7 +415,8 @@ async def predict(
                     })
 
                 # --- Handle Single Model Mode -----------------------------
-                accumulated = {'original': [], 'overlay': [], 'reconstruction': []} 
+                accumulated = {'original': [], 'overlay': [], 'reconstruction': [], 
+                               'preprocessed': [], 'error_map': []} 
                 max_score, final_label = -float('inf'), 'normal'
                 for _, b in slices_data:
                     r = process_dicom_bytes(b, model_name, img_size, include_images=True)
@@ -424,7 +435,8 @@ async def predict(
                         'original': _make_gif_b64(accumulated['original']),
                         'overlay': _make_gif_b64(accumulated['overlay']),
                         'reconstruction': _make_gif_b64(accumulated['reconstruction']),
-                        'preprocessed': "", 'error_map': ""
+                        'preprocessed': _make_gif_b64(accumulated['preprocessed']),
+                        'error_map': _make_gif_b64(accumulated['error_map'])
                     }
                 })
         else:

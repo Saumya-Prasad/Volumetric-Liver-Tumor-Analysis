@@ -65,36 +65,81 @@
             android:textSize="12sp"
             android:layout_marginTop="2dp" />
 
-        <!-- Diagnostic Frame -->
+        <!-- Diagnostic Frame (Comparison Area) -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
-            android:layout_height="280dp"
+            android:layout_height="wrap_content"
+            android:minHeight="280dp"
             android:layout_marginTop="20dp"
             android:layout_marginBottom="16dp"
             app:cardCornerRadius="16dp"
             app:cardElevation="0dp"
             app:cardBackgroundColor="@color/black">
 
-            <ImageView
-                android:id="@+id/ivViewer"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:scaleType="fitCenter" />
-            
-            <!-- Frame Label Overlay -->
-            <TextView
-                android:id="@+id/tvFrameLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="top|start"
-                android:layout_margin="12dp"
-                android:text="ANATOMY"
-                android:background="#80000000"
-                android:textColor="@color/white"
-                android:padding="6dp"
-                android:textSize="9sp"
-                android:textStyle="bold"
-                android:letterSpacing="0.1" />
+                android:orientation="vertical">
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="250dp">
+
+                    <ImageView
+                        android:id="@+id/ivViewer"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:scaleType="fitCenter" />
+
+                    <TextView
+                        android:id="@+id/tvFrameLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="top|start"
+                        android:layout_margin="12dp"
+                        android:text="ANATOMY"
+                        android:background="#80000000"
+                        android:textColor="@color/white"
+                        android:padding="6dp"
+                        android:textSize="9sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.1" />
+                </FrameLayout>
+
+                <View
+                    android:id="@+id/ivDivider"
+                    android:layout_width="match_parent"
+                    android:layout_height="2dp"
+                    android:background="#15FFFFFF"
+                    android:visibility="gone" />
+
+                <FrameLayout
+                    android:id="@+id/frameSecondary"
+                    android:layout_width="match_parent"
+                    android:layout_height="250dp"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/ivViewerSecondary"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:scaleType="fitCenter" />
+
+                    <TextView
+                        android:id="@+id/tvFrameLabelSecondary"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="top|start"
+                        android:layout_margin="12dp"
+                        android:text="AI PREDICTION"
+                        android:background="#80000000"
+                        android:textColor="@color/white"
+                        android:padding="6dp"
+                        android:textSize="9sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.1" />
+                </FrameLayout>
+            </LinearLayout>
 
         </com.google.android.material.card.MaterialCardView>
 

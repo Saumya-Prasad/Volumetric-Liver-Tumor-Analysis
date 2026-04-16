@@ -305,9 +305,9 @@ def anomaly_score(model: AEFlow,
     with torch.no_grad():
         x_hat, z_prime, log_det = model(x)
 
-        # Hypo-dense focus: reconstruction (healthy) > input (dark spot)
-        recon_map  = torch.clamp(x_hat - x, min=1e-6)  # (B,1,H,W)
-        recon_err  = (recon_map ** 2).mean(dim=[1,2,3])    # (B,)
+        # Standard absolute error captures all tissue density variations
+        error_map  = torch.abs(x - x_hat)
+        recon_err  = (error_map ** 2).mean(dim=[1,2,3])    # (B,)
 
         # Per-image flow score
         hw         = z_prime.shape[2] * z_prime.shape[3]
@@ -316,7 +316,7 @@ def anomaly_score(model: AEFlow,
 
         score = alpha * recon_err + beta * flow_score
 
-    return score, recon_map.sqrt(), x_hat
+    return score, error_map, x_hat
 
 
 # ──────────────────────────────────────────────

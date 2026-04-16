@@ -3,6 +3,8 @@ package com.example.livertumorscanner
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import android.view.LayoutInflater
 import android.view.View
@@ -92,7 +94,11 @@ class MainActivity : AppCompatActivity() {
         val tvLabel = cardView.findViewById<TextView>(R.id.tvModelLabel)
         val badgeStatus = cardView.findViewById<View>(R.id.badgeStatus)
         val ivViewer = cardView.findViewById<ImageView>(R.id.ivViewer)
+        val ivViewerSecondary = cardView.findViewById<ImageView>(R.id.ivViewerSecondary)
+        val frameSecondary = cardView.findViewById<View>(R.id.frameSecondary)
+        val ivDivider = cardView.findViewById<View>(R.id.ivDivider)
         val tvFrameLabel = cardView.findViewById<TextView>(R.id.tvFrameLabel)
+        val tvFrameLabelSec = cardView.findViewById<TextView>(R.id.tvFrameLabelSecondary)
         val toggleGroup = cardView.findViewById<com.google.android.material.button.MaterialButtonToggleGroup>(R.id.toggleGroup)
 
         tvName.text = modelName.replace("_", " ").uppercase()
@@ -103,25 +109,41 @@ class MainActivity : AppCompatActivity() {
         tvLabel.setTextColor(diagColor)
         badgeStatus.backgroundTintList = android.content.res.ColorStateList.valueOf(diagColor).withAlpha(40)
 
-        // Initial State: Show Overlay
+        // Initial Logic and Setup
+        ivDivider.visibility = View.VISIBLE
+        frameSecondary.visibility = View.VISIBLE
+        decodeAndBind(result.images.preprocessed, ivViewer)
+        decodeAndBind(result.images.overlay, ivViewerSecondary)
+        tvFrameLabel.text = "1. ANATOMICAL BASIS (SCAN)"
+        tvFrameLabelSec.text = "2. AI TUMOR MASK (DETECTION)"
         toggleGroup.check(R.id.btnOverlay)
-        decodeAndBind(result.images.overlay, ivViewer)
-        tvFrameLabel.text = "AI OVERLAY"
 
         toggleGroup.addOnButtonCheckedListener { group, checkedId, isChecked ->
             if (isChecked) {
+                // Force clear previous images to prevent 'ghosting' or 'sticky' views
+                Glide.with(this).clear(ivViewer)
+                Glide.with(this).clear(ivViewerSecondary)
+                
                 when (checkedId) {
                     R.id.btnOriginal -> {
+                        ivDivider.visibility = View.GONE
+                        frameSecondary.visibility = View.GONE
                         decodeAndBind(result.images.original, ivViewer)
-                        tvFrameLabel.text = "ANATOMY"
+                        tvFrameLabel.text = "ORIGINAL DICOM BASIS"
                     }
                     R.id.btnOverlay -> {
-                        decodeAndBind(result.images.overlay, ivViewer)
-                        tvFrameLabel.text = "AI OVERLAY"
+                        ivDivider.visibility = View.VISIBLE
+                        frameSecondary.visibility = View.VISIBLE
+                        decodeAndBind(result.images.preprocessed, ivViewer)
+                        decodeAndBind(result.images.overlay, ivViewerSecondary)
+                        tvFrameLabel.text = "1. ANATOMICAL BASIS (SCAN)"
+                        tvFrameLabelSec.text = "2. AI TUMOR MASK (DETECTION)"
                     }
                     R.id.btnRecon -> {
+                        ivDivider.visibility = View.GONE
+                        frameSecondary.visibility = View.GONE
                         decodeAndBind(result.images.reconstruction, ivViewer)
-                        tvFrameLabel.text = "HEALTHY RECONSTRUCTION"
+                        tvFrameLabel.text = "AI HEALTHY RECONSTRUCTION"
                     }
                 }
             }
@@ -140,11 +162,18 @@ class MainActivity : AppCompatActivity() {
             val bytes = Base64.decode(base64Str, Base64.DEFAULT)
             if (bytes.isNotEmpty()) {
                 Glide.with(this)
+                    .asGif() // Ensure it treats the stream as a gif
                     .load(bytes)
+                    .diskCacheStrategy(com.bumptech.glide.load.engine.DiskCacheStrategy.NONE)
+                    .skipMemoryCache(true)
                     .into(targetView)
             }
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
     }
 }
