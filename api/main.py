@@ -48,7 +48,10 @@ from fastapi.middleware.cors import CORSMiddleware
 # ── Make parent importable ────────────────────
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from dataset import preprocess_dicom
-from inference import load_model, run_inference, classify, THRESHOLDS, save_results
+from inference import load_model, run_inference, classify, THRESHOLDS_GLOBAL, THRESHOLDS_LIVER, save_results
+from liver_segmenter import get_liver_mask, crop_to_liver, uncrop_error_map
+
+LIVER_CROP_MODE = True # Set to True once your models finish training with --liver_crop parameter!
 
 # ─────────────────────────────────────────────
 # App
@@ -95,7 +98,14 @@ MODEL_DESCRIPTIONS = {
 
 def get_model(model_name: str):
     if model_name not in _model_cache:
-        ckpt_path = os.path.join(CKPT_DIR, AVAILABLE_MODELS[model_name])
+        base_name = AVAILABLE_MODELS[model_name]
+        if LIVER_CROP_MODE:
+            crop_name = base_name.replace('_best.pt', '_liver_crop_best.pt')
+            crop_path = os.path.join(CKPT_DIR, crop_name)
+            ckpt_path = crop_path if os.path.exists(crop_path) else os.path.join(CKPT_DIR, base_name)
+        else:
+            ckpt_path = os.path.join(CKPT_DIR, base_name)
+            
         if not os.path.exists(ckpt_path):
             # Return untrained model for demo
             from models.model_1_conv_ae   import ConvAutoencoder
@@ -162,7 +172,12 @@ def _get_slice_location(dcm_bytes: bytes) -> float:
 def _make_overlay(preprocessed: np.ndarray,
                   error_map: np.ndarray) -> np.ndarray:
     """Red overlay on detected regions."""
-    threshold    = float(np.percentile(error_map, 95))
+    active_errors = error_map[error_map > 0]
+    if len(active_errors) > 0:
+        threshold = float(np.percentile(active_errors, 90))
+    else:
+        threshold = 100.0  # Safe block
+        
     binary_mask  = error_map > threshold
     rgb          = np.stack([preprocessed]*3, axis=-1)
     overlay      = rgb.copy()
@@ -191,35 +206,48 @@ def process_dicom_bytes(dicom_bytes: bytes, model_name: str, img_size: int):
         tmp_path = tmp.name
 
     try:
-        # Raw pixels
+        # Raw pixels setup for display
         dcm       = pydicom.dcmread(tmp_path)
         raw       = dcm.pixel_array.astype(np.float32)
         raw_norm  = (raw - raw.min()) / ((raw.max() - raw.min()) + 1e-8)
         raw_pil   = np.array(Image.fromarray(
             (raw_norm * 255).astype(np.uint8)).resize((img_size, img_size))) / 255.0
 
-        # Preprocessed (HU windowing)
-        prep      = preprocess_dicom(tmp_path, target_size=img_size)
+        # Extract Preprocessed HU slice
+        prep = preprocess_dicom(tmp_path, target_size=img_size)
 
-        # Tensor
-        x = torch.from_numpy(prep).unsqueeze(0).unsqueeze(0).float().to(DEVICE)
+        # Extract Robust Geometry Mask via the newly created External Framework!
+        mask = get_liver_mask(tmp_path, target_size=img_size, prefer_gt=False)
+        
+        # Model Injection Configuration Safeties
+        if LIVER_CROP_MODE:
+            model_input, _, bbox = crop_to_liver(prep, mask, target_size=img_size)
+        else:
+            model_input = prep * mask
 
-        # Run model
-        model     = get_model(model_name)
-        score, emap, xh = run_inference(model, model_name, x)
-        label     = classify(score, model_name)
+        # Tensor Build
+        x = torch.from_numpy(model_input).unsqueeze(0).unsqueeze(0).float().to(DEVICE)
 
-        emap_np   = emap.squeeze().cpu().detach().numpy()
-        xh_np     = xh.squeeze().cpu().detach().numpy()
+        # Run Neural Model
+        model = get_model(model_name)
+        score, emap_np, xh_np = run_inference(model, model_name, x)
 
-        overlay   = _make_overlay(prep, emap_np)
-        heatmap   = _make_heatmap(emap_np)
+        # Rescale Error Map outwards if physically cropped, else zero-shift.
+        if LIVER_CROP_MODE:
+            emap_np = uncrop_error_map(emap_np, bbox, full_size=img_size)
+        else:
+            emap_np = emap_np * mask
+            
+        label = classify(score, model_name, liver_mode=True)
+
+        overlay = _make_overlay(prep, emap_np)
+        heatmap = _make_heatmap(emap_np)
 
         return {
             'score'          : round(score, 6),
             'label'          : label,
             'model'          : model_name,
-            'threshold'      : THRESHOLDS.get(model_name, 0.02),
+            'threshold'      : THRESHOLDS_LIVER.get(model_name, 0.02),
             'images': {
                 'original'     : _np_to_b64(raw_pil),
                 'preprocessed' : _np_to_b64(prep),
@@ -306,7 +334,7 @@ async def predict(
                     'score': max_score,
                     'label': final_label,
                     'model': model_name,
-                    'threshold': THRESHOLDS.get(model_name, 0.02),
+                    'threshold': THRESHOLDS_LIVER.get(model_name, 0.02),
                     'images': {k: _make_gif_b64(accumulated[k]) for k in accumulated}
                 })
         else:
