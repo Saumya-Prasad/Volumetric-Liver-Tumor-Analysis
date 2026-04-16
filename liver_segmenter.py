@@ -104,45 +104,48 @@ def hu_liver_mask(dicom_path: str,
 
     # --- Soft-tissue threshold + Cleaning --------------------------------
     soft   = ((hu >= hu_low) & (hu <= hu_high)).astype(np.uint8)
+    # Strict Anatomical Y-Floor: The spine/back muscles are in the bottom 25%
+    # We explicitly suppress the bottom region before labelling to avoid distraction.
+    soft[int(target_size*0.75):, :] = 0
     soft   = ndimage.binary_fill_holes(soft).astype(np.uint8)
     
     # Aggressively erode to sever muscle/fat connections
-    eroded = ndimage.binary_erosion(soft, iterations=10)
+    eroded = ndimage.binary_erosion(soft, iterations=6)
 
     # --- Anatomical Filtering: Favor Image-Left (Patient-Right) -----------
     labeled, n = ndimage.label(eroded)
     if n == 0:
-        # If erosion killed everything, fallback to soft mask without erosion
         labeled, n = ndimage.label(soft)
         if n == 0:
-            return np.ones((target_size, target_size), dtype=np.float32)
+            return np.zeros((target_size, target_size), dtype=np.float32)
 
-    if n == 1:
-        liver = (labeled == 1).astype(np.float32)
-    else:
-        # Check top 3 components to find the one that looks most like a liver (on the left)
-        component_info = []
-        for i in range(1, n + 1):
-            mask_i  = (labeled == i)
-            size_i  = np.sum(mask_i)
-            com_i   = ndimage.center_of_mass(mask_i) # (y, x)
-            component_info.append({'id': i, 'size': size_i, 'x_center': com_i[1]})
-            
-        # Filter for components that aren't purely on the right side of the image (Stomach/Spleen area)
-        # In a 256px image, x < 160 is a safe threshold for liver bulk.
-        liver_candidates = [c for c in component_info if c['x_center'] < 160]
+    # Scrutinize all components for anatomical fit
+    component_info = []
+    for i in range(1, n + 1):
+        mask_i  = (labeled == i)
+        size_i  = np.sum(mask_i)
+        com_i   = ndimage.center_of_mass(mask_i) # (y, x)
+        # Quadrant Weight: Prioritize top-left (patient right) and size
+        # Distance from ideal liver center (roughly 1/4 width, 1/3 height)
+        dist_from_anchor = np.sqrt((com_i[1] - target_size*0.25)**2 + (com_i[0] - target_size*0.35)**2)
         
-        if not liver_candidates:
-            # Fallback to absolute largest if no candidate fits spatial rule
-            largest_id = int(np.argmax([c['size'] for c in component_info])) + 1
-            liver = (labeled == largest_id).astype(np.float32)
-        else:
-            # Pick largest among valid spatial candidates
-            best_candidate = max(liver_candidates, key=lambda x: x['size'])
-            liver = (labeled == best_candidate['id']).astype(np.float32)
+        # Strict Anatomical Bias: If a component is mostly on the right side, kill its score
+        # (The liver is on the Image-Left, Stomach/Spleen on Image-Right)
+        spatial_penalty = 1.0
+        if com_i[1] > target_size * 0.55: # Beyond midline
+            spatial_penalty = 0.001
+            
+        score_i = (size_i * spatial_penalty) / (dist_from_anchor + 1.0)
+        component_info.append({'id': i, 'size': size_i, 'score': score_i, 'x_center': com_i[1]})
+            
+    # Strictly favor the Image-Left (x < img_width/2)
+    # The liver is overwhelmingly on the left side of the scan image.
+    best_candidate = max(component_info, key=lambda x: x['score'])
+    liver = (labeled == best_candidate['id']).astype(np.float32)
 
-    # Restore volume + generous boundary margin
-    liver = ndimage.binary_dilation(liver, iterations=12).astype(np.float32)
+    # Restore volume + tight boundary margin
+    liver = ndimage.binary_dilation(liver, iterations=6).astype(np.float32)
+    liver = ndimage.binary_fill_holes(liver).astype(np.float32)
 
     pil = Image.fromarray((liver * 255).astype(np.uint8))
     pil = pil.resize((target_size, target_size), Image.NEAREST)

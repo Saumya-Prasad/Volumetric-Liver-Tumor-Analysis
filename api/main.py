@@ -181,15 +181,24 @@ def _make_overlay(preprocessed: np.ndarray,
     # Only calculate stats on non-zero liver pixels to avoid background dilution
     active_errors = error_map[error_map > 1e-6]
     if len(active_errors) > 0:
-        # Lowered to 85th percentile to increase sensitivity to smaller dark tumors
-        threshold = float(np.percentile(active_errors, 85))
+        # Sweet Spot Adaptive Threshold: Clamped Sensitivity Model
+        # floor = 0.025 (ignores AI grain / pepper noise)
+        # cap   = 0.040 (ensures large tumors aren't ignored by a picking-too-high percentile)
+        p70 = float(np.percentile(active_errors, 70))
+        threshold = max(0.025, min(p70, 0.040))
     else:
-        threshold = max(threshold, 0.005) # noise floor
+        threshold = 0.040 # noise floor cap
         
-    # Black Exclusion Filter: Ignore anomalies in air/gas regions (HU < -40)
-    # real tumors are hypo-dense soft-tissue, not air/gas cavities.
-    is_not_black = (preprocessed > 0.2)
-    binary_mask  = (error_map > threshold) & is_not_black
+    # Spatial Consistency Filter: Real tumors are 'blobs', noise is 'pepper dots'.
+    # We apply a 3x3 median filter to eliminate isolated noisy pixels.
+    from scipy.ndimage import median_filter
+    error_map_smoothed = median_filter(error_map, size=3)
+    
+    # Black Exclusion Filter: Ignore air/gas (HU < -40)
+    # White Exclusion Filter: Ignore bone/spine (HU > 120)
+    # real tumors are hypo-dense soft-tissue, not cavities or bones.
+    is_tumor_tissue = (preprocessed > 0.3) & (preprocessed < 0.65) 
+    binary_mask  = (error_map_smoothed > threshold) & is_tumor_tissue
     rgb          = np.stack([preprocessed]*3, axis=-1)
     overlay      = rgb.copy()
     overlay[binary_mask, 0] = 1.0
