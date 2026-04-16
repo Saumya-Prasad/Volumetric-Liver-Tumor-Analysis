@@ -352,7 +352,7 @@ def save_results(original_np:     np.ndarray,
     with open(os.path.join(save_dir, 'result.json'), 'w') as f:
         json.dump(result, f, indent=2)
 
-    print(f"  → Results saved to {save_dir}/")
+    print(f"  -> Results saved to {save_dir}/")
     return result
 
 
@@ -544,7 +544,7 @@ def main():
 
     mode_str = (' [liver-crop]' if args.liver_crop else
                 ' [liver-mask]' if args.liver_mask else '')
-    print(f"Score{mode_str}: {liver_score:.5f}  →  {label.upper()}")
+    print(f"Score{mode_str}: {liver_score:.5f} -> {label.upper()}")
 
     save_results(raw_pil, inp_display, xh_display, emap_display,
                  liver_score, label, args.save_dir, args.model,

@@ -75,8 +75,9 @@ from models.model_5_qformer_ae import QFormerAE
 from models.model_6_ensemble_ae import EnsembleAE
 
 # ─────────────────────────────────────────────
+# Global Device (Gated for Windows Spawning)
+# ─────────────────────────────────────────────
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-print(f"[train.py] Using device: {DEVICE}")
 
 
 # ─────────────────────────────────────────────
@@ -507,6 +508,9 @@ def main():
              'Requires full retraining but produces the best anomaly scores.')
 
     args = parser.parse_args()
+    
+    # Master process prints only (Prevents Windows Spawn flooding)
+    print(f"[train.py] Using device: {DEVICE}")
 
     # Print liver mode clearly so logs are unambiguous
     if args.liver_crop:

@@ -1,0 +1,7 @@
+{
+  "model": "ensemble",
+  "score": 0.09764,
+  "label": "tumor",
+  "threshold": 0.008,
+  "liver_focused": true
+}
